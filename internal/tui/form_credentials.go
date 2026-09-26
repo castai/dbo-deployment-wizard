@@ -47,8 +47,8 @@ func newCredsForm(theme huh.Theme, mode *string, b api.Backend, creds *api.Crede
 
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Secret name").
-				Description("Discovered in the target namespace.").
+				Title("Select secret").
+				Description("Pick from existing secrets in namespace "+b.Namespace()).
 				OptionsFunc(func() []huh.Option[string] {
 					return lo.Map(b.Secrets(), func(s string, _ int) huh.Option[string] {
 						return huh.NewOption(s, s).Selected(s == creds.SecretName)

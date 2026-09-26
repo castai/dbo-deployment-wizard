@@ -31,7 +31,7 @@ func newTestClient(t *testing.T, body []byte) *HelmRepoClient {
 	}))
 	t.Cleanup(srv.Close)
 
-	return NewHelmRepoClient(srv.Client(), srv.URL)
+	return NewHelmRepoClient(srv.Client(), srv.URL, false)
 }
 
 func TestListVersions(t *testing.T) {

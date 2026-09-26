@@ -22,11 +22,19 @@ type Kubectl interface {
 	EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error
 }
 
-// RealKubectl invokes the kubectl binary on PATH.
-type RealKubectl struct{}
+// RealKubectl invokes the kubectl binary on PATH. SlowNetwork delays
+// every call by slowNetworkDelay — the --slow-network UI testing aid.
+type RealKubectl struct {
+	SlowNetwork bool
+}
 
 // run executes `kubectl <args>` and returns combined stdout/stderr.
-func (RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
+func (k RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
+	if k.SlowNetwork {
+		if err := sleepCtx(ctx, slowNetworkDelay); err != nil {
+			return nil, err
+		}
+	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 
 	return cmd.CombinedOutput()
@@ -34,8 +42,8 @@ func (RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
 
 // ListKubeContexts returns every context name; an empty result is an
 // error.
-func (RealKubectl) ListKubeContexts(ctx context.Context) ([]string, error) {
-	out, err := RealKubectl{}.run(ctx, "config", "get-contexts", "-o", "name")
+func (k RealKubectl) ListKubeContexts(ctx context.Context) ([]string, error) {
+	out, err := k.run(ctx, "config", "get-contexts", "-o", "name")
 	if err != nil {
 		return nil, err
 	}
@@ -54,8 +62,8 @@ func (RealKubectl) ListKubeContexts(ctx context.Context) ([]string, error) {
 
 // CurrentKubeContext returns the current context; an empty result
 // with no error is possible.
-func (RealKubectl) CurrentKubeContext(ctx context.Context) (string, error) {
-	out, err := RealKubectl{}.run(ctx, "config", "current-context")
+func (k RealKubectl) CurrentKubeContext(ctx context.Context) (string, error) {
+	out, err := k.run(ctx, "config", "current-context")
 	if err != nil {
 		return "", err
 	}
@@ -65,8 +73,8 @@ func (RealKubectl) CurrentKubeContext(ctx context.Context) (string, error) {
 
 // ListSecrets returns the names of every Secret in namespace on
 // kubeContext.
-func (RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace string) ([]string, error) {
-	out, err := RealKubectl{}.run(ctx, "--context", kubeContext, "-n", namespace,
+func (k RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace string) ([]string, error) {
+	out, err := k.run(ctx, "--context", kubeContext, "-n", namespace,
 		"get", "secret", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
 	if err != nil {
 		return nil, err
@@ -97,7 +105,12 @@ type secretMetadata struct {
 // EnsureSecret idempotently creates or updates a Secret holding the
 // given data. The manifest travels via stdin, so the values never
 // appear on the argv.
-func (RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error {
+func (k RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error {
+	if k.SlowNetwork {
+		if err := sleepCtx(ctx, slowNetworkDelay); err != nil {
+			return err
+		}
+	}
 	encoded := make(map[string]string, len(data))
 	for key, value := range data {
 		encoded[key] = base64.StdEncoding.EncodeToString([]byte(value))
