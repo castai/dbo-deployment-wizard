@@ -1,6 +1,10 @@
-#!/usr/bin/env bash
-# Test wrapper
-set -euo pipefail
+#!/bin/sh
+# Downloads the release binary for the detected platform and runs it.
+#
+#   curl -sSL https://github.com/castai/dbo-deployment-wizard/releases/latest/download/wrapper_cmd.sh | sh -s -- --api-secret=...
+#
+# goreleaser rewrites VERSION below when attaching this script to a release.
+set -eu
 
 REPO="castai/dbo-deployment-wizard"
 VERSION="0.0.1"
@@ -54,5 +58,5 @@ chmod +x "$BIN_PATH"
 # No-op (and harmless) on Linux, where this attribute doesn't exist.
 xattr -d com.apple.quarantine "$BIN_PATH" 2>/dev/null || true
 
-echo "Running: ${BIN_NAME}"
-"$BIN_PATH" --dry-run --api-secret=testing
+echo "Running: ${BIN_NAME} $*"
+"$BIN_PATH" "$@" < /dev/tty

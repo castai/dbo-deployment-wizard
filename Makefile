@@ -1,4 +1,4 @@
-.PHONY: lint fix gen test tidy release snapshot
+.PHONY: lint fix gen test tidy build
 
 GORELEASER := go run github.com/goreleaser/goreleaser/v2@v2.18.2
 
@@ -21,7 +21,6 @@ test:
 
 tidy:
 	go mod tidy
-
 
 # Build a local snapshot: binaries, nothing published.
 build:
