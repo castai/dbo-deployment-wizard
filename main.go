@@ -65,6 +65,8 @@ The wizard requires a real terminal; it cannot be run from a pipe or CI.`,
 		"URL of the Helm chart repository index.yaml used to list chart versions.")
 	cmd.Flags().StringVar(&cfg.ChartName, "chart-name", cfg.ChartName,
 		"Name of the Helm chart to install.")
+	cmd.Flags().StringVar(&cfg.ChartVersion, "chart-version", cfg.ChartVersion,
+		"Helm chart version to install.")
 	cmd.Flags().StringVar(&cfg.ReleaseName, "release-name", cfg.ReleaseName,
 		"Helm release name to use for the install.")
 	cmd.Flags().StringVar(&cfg.KubeContext, "kubecontext", "",

@@ -31,8 +31,6 @@ func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title 
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Source").
-				Description("How the component sources its database credentials.").
 				Options(
 					huh.NewOption("Existing Kubernetes Secret", mode_secret).Selected(pickedSecretMode == mode_secret),
 					huh.NewOption("Username and password", mode_user).Selected(pickedSecretMode == mode_secret),

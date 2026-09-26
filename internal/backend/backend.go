@@ -27,9 +27,6 @@ type Wizard struct {
 
 	cfg Config
 
-	// Discovered once at construction; the UI builds its pickers from these.
-	kubeContexts  []string
-	chartVersions []api.HelmChartVersion
 	latestVersion string
 }
 
@@ -60,32 +57,20 @@ func NewWizard(ctx context.Context, cfg Config, repo *HelmRepoClient, k Kubectl,
 		cfg:  cfg,
 	}
 
-	contexts, err := k.ListKubeContexts(ctx)
-	if err != nil {
-		return nil, err
-	}
-	w.kubeContexts = contexts
-
 	if w.cfg.KubeContext == "" {
 		if cur, err := k.CurrentKubeContext(ctx); err == nil && cur != "" {
 			w.cfg.KubeContext = cur
-		} else if len(contexts) > 0 {
-			w.cfg.KubeContext = contexts[0]
+		} else {
+			return nil, fmt.Errorf("could not determine current kubernetes context: %w", err)
 		}
 	}
 
-	latest, err := repo.LatestVersion(ctx, cfg.ChartName)
-	if err != nil {
-		return nil, fmt.Errorf("fetch latest chart version: %w", err)
-	}
-	w.cfg.ChartVersion = latest
-
-	// Cache-hot from the LatestVersion fetch; on failure the version
-	// picker degrades to free-text input.
-	versions, _ := repo.ListVersions(ctx, cfg.ChartName)
-	w.chartVersions = versions
-	if len(versions) > 0 {
-		w.latestVersion = versions[0].Number
+	if w.cfg.ChartVersion == "" {
+		latest, err := repo.LatestVersion(ctx, cfg.ChartName)
+		if err != nil {
+			return nil, fmt.Errorf("fetch latest chart version: %w", err)
+		}
+		w.cfg.ChartVersion = latest
 	}
 
 	return w, nil
@@ -104,10 +89,12 @@ func (w *Wizard) PoolingCredentials() api.Credentials { return w.cfg.PoolingCred
 func (w *Wizard) Components() []string { return slices.Clone(w.cfg.Components) }
 
 // KubeContexts returns the kubectl contexts discovered at construction.
-func (w *Wizard) KubeContexts() []string { return slices.Clone(w.kubeContexts) }
+func (w *Wizard) KubeContexts() ([]string, error) { return w.k.ListKubeContexts(w.ctx) }
 
 // ChartVersions returns every published chart version, newest first.
-func (w *Wizard) ChartVersions() []api.HelmChartVersion { return slices.Clone(w.chartVersions) }
+func (w *Wizard) ChartVersions() ([]api.HelmChartVersion, error) {
+	return w.repo.ListVersions(w.ctx, w.cfg.ChartName)
+}
 
 // LatestChartVersion returns the newest published version, or "" when
 // the repo lookup failed.

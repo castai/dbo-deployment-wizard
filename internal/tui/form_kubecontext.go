@@ -4,22 +4,25 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/samber/lo"
+
+	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
 
 // newKubeContextForm builds the kube-context form over the discovered
 // contexts; the list is guaranteed non-empty (NewWizard fails fast
 // otherwise).
-func newKubeContextForm(theme huh.Theme, contexts []string, d *draft) *huh.Form {
-	options := lo.Map(contexts, func(c string, _ int) huh.Option[string] {
-		return huh.NewOption(c, c).Selected(c == d.kubeContext)
-	})
-
+func newKubeContextForm(theme huh.Theme, contexts api.Backend, d *draft) *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Kubectl context").
 				Description("Cluster the chart is installed into.").
-				Options(options...).
+				OptionsFunc(func() []huh.Option[string] {
+					contexts, _ := contexts.KubeContexts()
+					return lo.Map(contexts, func(c string, _ int) huh.Option[string] {
+						return huh.NewOption(c, c).Selected(c == d.kubeContext)
+					})
+				}, d.kubeContext).
 				Value(&d.kubeContext),
 		),
 	).WithTheme(theme)

@@ -124,8 +124,8 @@ func (m *Model) syncDraft() {
 // buildForms builds every embedded form; the credentials screens'
 // Secret discovery is huh's dynamic options (see newCredsForm).
 func (m *Model) buildForms() {
-	m.kubeContextForm = newKubeContextForm(m.theme, m.backend.KubeContexts(), &m.draft)
-	m.chartVersionForm = newChartVersionForm(m.theme, m.backend.ChartVersions(), &m.draft)
+	m.kubeContextForm = newKubeContextForm(m.theme, m.backend, &m.draft)
+	m.chartVersionForm = newChartVersionForm(m.theme, m.backend, &m.draft)
 	m.namespaceForm = newNamespaceForm(m.theme, &m.draft)
 	m.componentsForm = newComponentsForm(m.theme, &m.draft)
 	m.agentCredsForm = newCredsForm(m.theme, m.backend, &m.draft.agentCreds, "Agent credentials")
@@ -140,10 +140,10 @@ func (m *Model) primeScreen(s screen) {
 		m.refreshReviewList()
 	case screenKubeContext:
 		m.syncDraft()
-		m.kubeContextForm = newKubeContextForm(m.theme, m.backend.KubeContexts(), &m.draft)
+		m.kubeContextForm = newKubeContextForm(m.theme, m.backend, &m.draft)
 	case screenChartVersion:
 		m.syncDraft()
-		m.chartVersionForm = newChartVersionForm(m.theme, m.backend.ChartVersions(), &m.draft)
+		m.chartVersionForm = newChartVersionForm(m.theme, m.backend, &m.draft)
 	case screenAgentCreds:
 		m.syncDraft()
 		m.agentCredsForm = newCredsForm(m.theme, m.backend, &m.draft.agentCreds, "Agent credentials")
