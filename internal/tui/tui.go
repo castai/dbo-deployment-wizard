@@ -111,7 +111,7 @@ func newModel(b api.Backend) *Model {
 	m.refreshReviewList()
 
 	m.syncDraft()
-	m.buildForms(nil)
+	m.buildForms()
 
 	return m
 }
@@ -127,15 +127,15 @@ func (m *Model) syncDraft() {
 	}
 }
 
-// buildForms builds every embedded form; the credentials screens
-// re-discover Secrets on entry in primeScreen.
-func (m *Model) buildForms(secrets []string) {
+// buildForms builds every embedded form; the credentials screens'
+// Secret discovery is huh's dynamic options (see newCredsForm).
+func (m *Model) buildForms() {
 	m.kubeContextForm = newKubeContextForm(m.theme, m.backend.KubeContexts(), &m.draft)
 	m.chartVersionForm = newChartVersionForm(m.theme, m.backend.ChartVersions(), &m.draft)
 	m.namespaceForm = newNamespaceForm(m.theme, &m.draft)
 	m.componentsForm = newComponentsForm(m.theme, &m.draft)
-	m.agentCredsForm = newCredsForm(m.theme, &m.agentCredsMode, secrets, &m.draft.agentCreds, "Agent credentials")
-	m.poolingCredsForm = newCredsForm(m.theme, &m.poolingCredsMode, secrets, &m.draft.poolingCreds, "Pooling credentials")
+	m.agentCredsForm = newCredsForm(m.theme, &m.agentCredsMode, m.backend, &m.draft.agentCreds, "Agent credentials")
+	m.poolingCredsForm = newCredsForm(m.theme, &m.poolingCredsMode, m.backend, &m.draft.poolingCreds, "Pooling credentials")
 }
 
 // primeScreen re-syncs the draft and rebuilds the screen's form (huh
@@ -152,7 +152,7 @@ func (m *Model) primeScreen(s screen) {
 		m.chartVersionForm = newChartVersionForm(m.theme, m.backend.ChartVersions(), &m.draft)
 	case screenAgentCreds:
 		m.syncDraft()
-		m.agentCredsForm = newCredsForm(m.theme, &m.agentCredsMode, m.backend.Secrets(), &m.draft.agentCreds, "Agent credentials")
+		m.agentCredsForm = newCredsForm(m.theme, &m.agentCredsMode, m.backend, &m.draft.agentCreds, "Agent credentials")
 	case screenComponents:
 		m.syncDraft()
 		m.componentsForm = newComponentsForm(m.theme, &m.draft)
@@ -161,7 +161,7 @@ func (m *Model) primeScreen(s screen) {
 		m.namespaceForm = newNamespaceForm(m.theme, &m.draft)
 	case screenPoolingCreds:
 		m.syncDraft()
-		m.poolingCredsForm = newCredsForm(m.theme, &m.poolingCredsMode, m.backend.Secrets(), &m.draft.poolingCreds, "Pooling credentials")
+		m.poolingCredsForm = newCredsForm(m.theme, &m.poolingCredsMode, m.backend, &m.draft.poolingCreds, "Pooling credentials")
 	}
 }
 
