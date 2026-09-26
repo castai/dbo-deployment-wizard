@@ -29,7 +29,6 @@ esac
 ASSET="${BIN_NAME}_${VERSION}_${OS}_${ARCH}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/v${VERSION}/${ASSET}"
 
-echo "Detected platform: ${OS}/${ARCH}"
 echo "Downloading: ${URL}"
 
 WORKDIR="$(mktemp -d)"
@@ -37,7 +36,6 @@ trap 'rm -rf "$WORKDIR"' EXIT
 
 curl -sSL -o "${WORKDIR}/${ASSET}" "$URL"
 
-echo "Extracting..."
 tar -xzf "${WORKDIR}/${ASSET}" -C "$WORKDIR"
 
 BIN_PATH="${WORKDIR}/${BIN_NAME}"
@@ -58,5 +56,5 @@ chmod +x "$BIN_PATH"
 # No-op (and harmless) on Linux, where this attribute doesn't exist.
 xattr -d com.apple.quarantine "$BIN_PATH" 2>/dev/null || true
 
-echo "Running: ${BIN_NAME} $*"
+# execute with passed flags
 "$BIN_PATH" "$@" < /dev/tty
