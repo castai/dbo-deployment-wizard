@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"sync/atomic"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/samber/lo"
@@ -21,17 +23,23 @@ const (
 // funcs. The secret picker loads its options through huh's dynamic
 // options: discovery runs asynchronously with a spinner while the
 // existing-Secret group is active, so a slow cluster never blocks the
-// form and the username/password path never triggers it. The fields
-// carry no required-validation — huh blocks group navigation while a
-// group has errors, which would trap the user in the username/password
-// step; completeness is enforced by the review screen's Continue gate
-// instead.
+// form and the username/password path never triggers it; an empty
+// discovery hides the picker and shows a free-text name input instead.
+// The fields carry no required-validation — huh blocks group
+// navigation while a group has errors, which would trap the user in
+// the username/password step; completeness is enforced by the review
+// screen's Continue gate instead.
 func newCredsForm(theme huh.Theme, mode *string, b api.Backend, creds *api.Credentials, title string) *huh.Form {
 	def := credsModeSecretLabel
 	if creds.SecretName == "" && creds.Username != "" {
 		def = credsModeUserPassLabel
 	}
 	*mode = def
+
+	// noSecrets flips when discovery finds nothing, swapping the
+	// picker group for a free-text input; the hide funcs read it live.
+	// Atomic: the options function runs off the UI thread.
+	var noSecrets atomic.Bool
 
 	return huh.NewForm(
 		huh.NewGroup(
@@ -50,14 +58,26 @@ func newCredsForm(theme huh.Theme, mode *string, b api.Backend, creds *api.Crede
 				Title("Select secret").
 				Description("Pick from existing secrets in namespace "+b.Namespace()).
 				OptionsFunc(func() []huh.Option[string] {
-					return lo.Map(b.Secrets(), func(s string, _ int) huh.Option[string] {
+					secrets := b.Secrets()
+					noSecrets.Store(len(secrets) == 0)
+
+					return lo.Map(secrets, func(s string, _ int) huh.Option[string] {
 						return huh.NewOption(s, s).Selected(s == creds.SecretName)
 					})
 				}, mode).
 				Value(&creds.SecretName),
 		).
 			Title(title).
-			WithHideFunc(func() bool { return *mode != credsModeSecretLabel }),
+			WithHideFunc(func() bool { return *mode != credsModeSecretLabel || noSecrets.Load() }),
+
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Secret name").
+				Description("No Secrets discovered in namespace "+b.Namespace()+"; enter the name.").
+				Value(&creds.SecretName),
+		).
+			Title(title).
+			WithHideFunc(func() bool { return *mode != credsModeSecretLabel || !noSecrets.Load() }),
 
 		huh.NewGroup(
 			huh.NewInput().
