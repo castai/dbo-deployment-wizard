@@ -77,12 +77,6 @@ type Model struct {
 	agentCredsForm   *huh.Form
 	poolingCredsForm *huh.Form
 
-	// agentCredsMode / poolingCredsMode are the sources the credentials
-	// forms' selects picked; the group hide funcs read them live and
-	// completeForm uses them to pick the committed source.
-	agentCredsMode   string
-	poolingCredsMode string
-
 	done   bool
 	cancel bool
 }
@@ -134,8 +128,8 @@ func (m *Model) buildForms() {
 	m.chartVersionForm = newChartVersionForm(m.theme, m.backend.ChartVersions(), &m.draft)
 	m.namespaceForm = newNamespaceForm(m.theme, &m.draft)
 	m.componentsForm = newComponentsForm(m.theme, &m.draft)
-	m.agentCredsForm = newCredsForm(m.theme, &m.agentCredsMode, m.backend, &m.draft.agentCreds, "Agent credentials")
-	m.poolingCredsForm = newCredsForm(m.theme, &m.poolingCredsMode, m.backend, &m.draft.poolingCreds, "Pooling credentials")
+	m.agentCredsForm = newCredsForm(m.theme, m.backend, &m.draft.agentCreds, "Agent credentials")
+	m.poolingCredsForm = newCredsForm(m.theme, m.backend, &m.draft.poolingCreds, "Pooling credentials")
 }
 
 // primeScreen re-syncs the draft and rebuilds the screen's form (huh
@@ -152,7 +146,7 @@ func (m *Model) primeScreen(s screen) {
 		m.chartVersionForm = newChartVersionForm(m.theme, m.backend.ChartVersions(), &m.draft)
 	case screenAgentCreds:
 		m.syncDraft()
-		m.agentCredsForm = newCredsForm(m.theme, &m.agentCredsMode, m.backend, &m.draft.agentCreds, "Agent credentials")
+		m.agentCredsForm = newCredsForm(m.theme, m.backend, &m.draft.agentCreds, "Agent credentials")
 	case screenComponents:
 		m.syncDraft()
 		m.componentsForm = newComponentsForm(m.theme, &m.draft)
@@ -161,7 +155,7 @@ func (m *Model) primeScreen(s screen) {
 		m.namespaceForm = newNamespaceForm(m.theme, &m.draft)
 	case screenPoolingCreds:
 		m.syncDraft()
-		m.poolingCredsForm = newCredsForm(m.theme, &m.poolingCredsMode, m.backend, &m.draft.poolingCreds, "Pooling credentials")
+		m.poolingCredsForm = newCredsForm(m.theme, m.backend, &m.draft.poolingCreds, "Pooling credentials")
 	}
 }
 
@@ -324,21 +318,11 @@ func (m *Model) completeForm() {
 	case screenComponents:
 		_ = m.backend.SetComponents(m.draft.components)
 	case screenAgentCreds:
-		m.backend.SetAgentCredentials(credentialsFromDraft(m.draft.agentCreds, m.agentCredsMode))
+		m.backend.SetAgentCredentials(m.draft.agentCreds)
 	case screenPoolingCreds:
-		m.backend.SetPoolingCredentials(credentialsFromDraft(m.draft.poolingCreds, m.poolingCredsMode))
+		m.backend.SetPoolingCredentials(m.draft.poolingCreds)
 	}
 	m.goToReview()
-}
-
-// credentialsFromDraft keeps only the source the form's select picked,
-// so the committed struct never carries both.
-func credentialsFromDraft(c api.Credentials, mode string) api.Credentials {
-	if mode == credsModeUserPassLabel {
-		return api.Credentials{Username: c.Username, Password: c.Password}
-	}
-
-	return api.Credentials{SecretName: c.SecretName}
 }
 
 // Run starts the bubbletea program. The install itself runs after the

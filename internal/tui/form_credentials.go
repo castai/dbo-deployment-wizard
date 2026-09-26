@@ -1,21 +1,11 @@
 package tui
 
 import (
-	"sync/atomic"
-
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/samber/lo"
 
 	"github.com/castai/dbo-deployment-wizard/internal/api"
-)
-
-// Credential source labels.
-//
-//nolint:gosec // G101: UI labels, not credentials.
-const (
-	credsModeSecretLabel   = "Existing Kubernetes Secret"
-	credsModeUserPassLabel = "Username and password"
 )
 
 // newCredsForm builds the multi-step credentials form: the source
@@ -29,17 +19,14 @@ const (
 // navigation while a group has errors, which would trap the user in
 // the username/password step; completeness is enforced by the review
 // screen's Continue gate instead.
-func newCredsForm(theme huh.Theme, mode *string, b api.Backend, creds *api.Credentials, title string) *huh.Form {
-	def := credsModeSecretLabel
-	if creds.SecretName == "" && creds.Username != "" {
-		def = credsModeUserPassLabel
-	}
-	*mode = def
+func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title string) *huh.Form {
+	const mode_secret = "secret"
+	const mode_user = "user"
 
-	// noSecrets flips when discovery finds nothing, swapping the
-	// picker group for a free-text input; the hide funcs read it live.
-	// Atomic: the options function runs off the UI thread.
-	var noSecrets atomic.Bool
+	pickedSecretMode := lo.Ternary(creds == nil || creds.SecretName != "" || creds.Username == "", mode_secret, mode_user)
+	modePtr := lo.ToPtr(pickedSecretMode)
+
+	fallbackToManualEdit := false
 
 	return huh.NewForm(
 		huh.NewGroup(
@@ -47,10 +34,10 @@ func newCredsForm(theme huh.Theme, mode *string, b api.Backend, creds *api.Crede
 				Title("Source").
 				Description("How the component sources its database credentials.").
 				Options(
-					huh.NewOption(credsModeSecretLabel, credsModeSecretLabel).Selected(def == credsModeSecretLabel),
-					huh.NewOption(credsModeUserPassLabel, credsModeUserPassLabel).Selected(def == credsModeUserPassLabel),
+					huh.NewOption("Existing Kubernetes Secret", mode_secret).Selected(pickedSecretMode == mode_secret),
+					huh.NewOption("Username and password", mode_user).Selected(pickedSecretMode == mode_secret),
 				).
-				Value(mode),
+				Value(modePtr),
 		).Title(title),
 
 		huh.NewGroup(
@@ -59,25 +46,39 @@ func newCredsForm(theme huh.Theme, mode *string, b api.Backend, creds *api.Crede
 				Description("Pick from existing secrets in namespace "+b.Namespace()).
 				OptionsFunc(func() []huh.Option[string] {
 					secrets := b.Secrets()
-					noSecrets.Store(len(secrets) == 0)
+					fallbackToManualEdit = len(secrets) == 0
+
+					if fallbackToManualEdit {
+						return []huh.Option[string]{
+							huh.NewOption("No secrets found, continue to enter key manually...", "").Selected(true),
+						}
+					}
 
 					return lo.Map(secrets, func(s string, _ int) huh.Option[string] {
 						return huh.NewOption(s, s).Selected(s == creds.SecretName)
 					})
-				}, mode).
+				}, pickedSecretMode).
 				Value(&creds.SecretName),
 		).
 			Title(title).
-			WithHideFunc(func() bool { return *mode != credsModeSecretLabel || noSecrets.Load() }),
+			WithHideFunc(func() bool {
+				if !(*modePtr == mode_secret && !fallbackToManualEdit) {
+					return true
+				}
+				creds.Password = ""
+				creds.Username = ""
+				return false
+			}),
 
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Secret name").
-				Description("No Secrets discovered in namespace "+b.Namespace()+"; enter the name.").
 				Value(&creds.SecretName),
 		).
 			Title(title).
-			WithHideFunc(func() bool { return *mode != credsModeSecretLabel || !noSecrets.Load() }),
+			WithHideFunc(func() bool {
+				return !(*modePtr == mode_secret && fallbackToManualEdit)
+			}),
 
 		huh.NewGroup(
 			huh.NewInput().
@@ -89,7 +90,13 @@ func newCredsForm(theme huh.Theme, mode *string, b api.Backend, creds *api.Crede
 				Value(&creds.Password),
 		).
 			Title(title).
-			WithHideFunc(func() bool { return *mode != credsModeUserPassLabel }),
+			WithHideFunc(func() bool {
+				if *modePtr != mode_user {
+					return true
+				}
+				creds.SecretName = ""
+				return false
+			}),
 	).WithTheme(theme)
 }
 
