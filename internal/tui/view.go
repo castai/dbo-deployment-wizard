@@ -69,7 +69,8 @@ func (m *Model) View() tea.View {
 
 func wrapView(body string) tea.View {
 	v := tea.NewView(body)
-	v.AltScreen = true
+	// Alt screen seems to cause issues in AWS and GCP cloud shells
+	v.AltScreen = false
 	v.MouseMode = tea.MouseModeNone
 
 	return v

@@ -165,15 +165,8 @@ func (m *Model) primeScreen(s screen) {
 	}
 }
 
-// Init is part of tea.Model; browser cloud shells start the full-repaint
-// loop (see cloudshell.go), native terminals render incrementally.
-func (m *Model) Init() tea.Cmd {
-	if browserCloudShell() {
-		return cloudShellRepaint()
-	}
-
-	return nil
-}
+// Init is part of tea.Model.
+func (m *Model) Init() tea.Cmd { return nil }
 
 // Update intercepts KeyPressMsg and background-color messages; every
 // other message — window sizes, and bracketed paste, which arrives as
@@ -182,9 +175,6 @@ func (m *Model) Init() tea.Cmd {
 //
 //nolint:ireturn // bubbletea v2 Model.Update mandates a tea.Model return.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if _, ok := msg.(repaintMsg); ok {
-		return m, tea.Batch(tea.ClearScreen, cloudShellRepaint())
-	}
 	if kpm, ok := msg.(tea.KeyPressMsg); ok {
 		mm, cmd := m.handleKey(kpm)
 
