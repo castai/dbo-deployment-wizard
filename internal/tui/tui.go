@@ -171,35 +171,40 @@ func (m *Model) Init() tea.Cmd { return nil }
 // Update intercepts KeyPressMsg and background-color messages; every
 // other message — window sizes, and bracketed paste, which arrives as
 // PasteMsg rather than KeyPressMsg — reaches the active form so it can
-// size itself and apply pastes.
+// size itself and apply pastes. Every screen switch batches in a
+// ClearScreen so the previous screen's frame is replaced instead of
+// left behind — the app renders inline, without the alt screen.
 //
 //nolint:ireturn // bubbletea v2 Model.Update mandates a tea.Model return.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if kpm, ok := msg.(tea.KeyPressMsg); ok {
-		mm, cmd := m.handleKey(kpm)
+	before := m.state
+	var cmd tea.Cmd
 
-		return mm, cmd
-	}
-	if bgm, ok := msg.(tea.BackgroundColorMsg); ok {
-		_, _ = forwardToForm(&m.kubeContextForm, bgm)
-		_, _ = forwardToForm(&m.poolingCredsForm, bgm)
-		_, _ = forwardToForm(&m.chartVersionForm, bgm)
-		_, _ = forwardToForm(&m.namespaceForm, bgm)
-		_, _ = forwardToForm(&m.componentsForm, bgm)
-		_, _ = forwardToForm(&m.agentCredsForm, bgm)
-
-		return m, nil
-	}
-	if f := m.activeForm(); f != nil {
-		cmd, done := forwardToForm(f, msg)
-		if done {
-			m.completeForm()
+	switch typed := msg.(type) {
+	case tea.KeyPressMsg:
+		_, cmd = m.handleKey(typed)
+	case tea.BackgroundColorMsg:
+		_, _ = forwardToForm(&m.kubeContextForm, typed)
+		_, _ = forwardToForm(&m.poolingCredsForm, typed)
+		_, _ = forwardToForm(&m.chartVersionForm, typed)
+		_, _ = forwardToForm(&m.namespaceForm, typed)
+		_, _ = forwardToForm(&m.componentsForm, typed)
+		_, _ = forwardToForm(&m.agentCredsForm, typed)
+	default:
+		if f := m.activeForm(); f != nil {
+			var done bool
+			cmd, done = forwardToForm(f, msg)
+			if done {
+				m.completeForm()
+			}
 		}
-
-		return m, cmd
 	}
 
-	return m, nil
+	if m.state != before {
+		cmd = tea.Batch(cmd, tea.ClearScreen)
+	}
+
+	return m, cmd
 }
 
 // handleKey is the central dispatcher: Ctrl+C aborts from anywhere;
