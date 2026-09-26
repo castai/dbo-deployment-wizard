@@ -1,12 +1,15 @@
-.PHONY: lint fix gen test tidy
+.PHONY: lint fix gen test tidy release snapshot
+
+GORELEASER := go run github.com/goreleaser/goreleaser/v2@v2.18.2
 
 # Lint the code.
 lint:
 	golangci-lint run
 
-# Lint and auto-fix fixable issues.
+# Lint, auto-fix fixable issues, and validate the release config.
 fix:
 	golangci-lint run --fix
+	$(GORELEASER) check
 
 # Regenerate mocks (configured in .mockery.yaml).
 gen:
@@ -18,3 +21,8 @@ test:
 
 tidy:
 	go mod tidy
+
+
+# Build a local snapshot: binaries, nothing published.
+build:
+	$(GORELEASER) release --snapshot --clean

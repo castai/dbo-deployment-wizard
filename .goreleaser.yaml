@@ -1,0 +1,24 @@
+version: 2
+
+project_name: dbo-deployment-wizard
+
+builds:
+  - id: dbo-deployment-wizard
+    main: .
+    binary: dbo-deployment-wizard
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+release:
+  # Releases are created in the GitHub UI; goreleaser only attaches artifacts.
+  mode: keep-existing
