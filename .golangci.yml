@@ -1,0 +1,163 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - asasalint
+    - bodyclose
+    - canonicalheader
+    - containedctx
+    - copyloopvar
+    - decorder
+    - depguard
+    - dogsled
+    - dupword
+    - durationcheck
+    - errcheck
+    - errname
+    - errorlint
+    - exptostd
+    - fatcontext
+    - forcetypeassert
+    - gochecknoinits
+    - gochecksumtype
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - goprintffuncname
+    - gosec
+    - govet
+    - grouper
+    - iface
+    - importas
+    - inamedparam
+    - ineffassign
+    - intrange
+    - ireturn
+    - lll
+    - loggercheck
+    - maintidx
+    - makezero
+    - mirror
+    - misspell
+    - nakedret
+    - nilerr
+    - nilnesserr
+    - nlreturn
+    - noctx
+    - nonamedreturns
+    - nosprintfhostport
+    - perfsprint
+    - predeclared
+    - reassign
+    - recvcheck
+    - revive
+    - rowserrcheck
+    - sloglint
+    - spancheck
+    - sqlclosecheck
+    - staticcheck
+    - testableexamples
+    - testifylint
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - whitespace
+  settings:
+    depguard:
+      rules:
+        wizard-tui-api-only:
+          list-mode: lax
+          files:
+            - "**/internal/tui/**"
+          deny:
+            - pkg: github.com/castai/dbo-deployment-wizard/internal/backend
+              desc: "The TUI must use the api layer (internal/api), not the service implementation."
+    govet:
+      settings:
+        printf:
+          funcs:
+            - (github.com/golangci/golangci-lint/pkg/logutils.Log).Infof
+            - (github.com/golangci/golangci-lint/pkg/logutils.Log).Warnf
+            - (github.com/golangci/golangci-lint/pkg/logutils.Log).Errorf
+            - (github.com/golangci/golangci-lint/pkg/logutils.Log).Fatalf
+    lll:
+      line-length: 200
+    misspell:
+      locale: US
+    mnd:
+      checks:
+        - argument
+        - case
+        - condition
+        - return
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - bodyclose
+          - goconst
+          - gosec
+          - maintidx
+          - mnd
+        path: _test\.go
+      - linters:
+          - gosec
+        text: G107
+      - linters:
+          - gosec
+        text: G112
+      - linters:
+          - gosec
+        text: 'G109: Potential Integer overflow made by strconv.Atoi result conversion to int16/32'
+      - linters:
+          - unparam
+        text: always receives
+      - linters:
+          - dupword
+        text: CURRENT_TIMESTAMP
+      - linters:
+          - revive
+        text: redundant if ...; err != nil check, just return error instead.
+      - linters:
+          - staticcheck
+        text: should not use underscores in package names
+      - linters:
+          - staticcheck
+        text: SA1019
+      - linters:
+          - ireturn
+        text: returns generic interface
+      - linters:
+          - revive
+        text: 'var-naming: avoid package names that conflict with Go standard library package names'
+    paths:
+      - .*\.gen\.go$
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gci
+    - gofumpt
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/castai)
+  exclusions:
+    generated: lax
+    paths:
+      - .*\.gen\.go$
+      - third_party$
+      - builtin$
+      - examples$
