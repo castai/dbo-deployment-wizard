@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -118,4 +119,27 @@ func (c *Config) SetComponentEnabled(name string, enabled bool) error {
 	sel = slices.DeleteFunc(sel, func(x string) bool { return x == name })
 
 	return c.SetComponents(sel)
+}
+
+// validate reports the unmet install prerequisites as one joined
+// error: the enabled components' credentials and the target
+// namespace. Kube context and chart version can't be emptied
+// through the contract (NewWizard fills them, the screens only
+// select), so they are not rechecked.
+func (c *Config) validate() error {
+	var errs []string
+	if c.Namespace == "" {
+		errs = append(errs, "namespace is required")
+	}
+	if c.HasComponent(api.ComponentDBAgent) && !c.AgentCreds.Provided() {
+		errs = append(errs, "agent credentials are required")
+	}
+	if c.HasComponent(api.ComponentPooling) && !c.PoolingCreds.Provided() {
+		errs = append(errs, "pooling credentials are required")
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+
+	return errors.New(strings.Join(errs, "; "))
 }

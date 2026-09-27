@@ -150,6 +150,10 @@ func credentialsWithPrecedence(c api.Credentials) api.Credentials {
 	return c
 }
 
+// Validate reports every unmet install prerequisite; the review
+// screen gates its Continue action on it.
+func (w *Wizard) Validate() error { return w.cfg.validate() }
+
 // Install runs the helm chart install; DryRun prints the values
 // and the exact command instead of executing. Credentials given as a
 // username/password pair are turned into Secrets in the target

@@ -18,18 +18,40 @@ import (
 // value, optional sub line) or — with action set — the Continue
 // install trigger.
 type reviewItem struct {
-	label    string
-	value    string
-	sub      string
-	subError bool
-	target   screen
-	action   bool
+	label string
+	value string
+	sub   string
+	// subWarn renders sub as the yellow "required" marker.
+	subWarn bool
+	// err is the Continue item's validation message, rendered
+	// above the button.
+	err    string
+	target screen
+	action bool
 }
 
 func (i reviewItem) FilterValue() string { return i.label + " " + i.value }
 
 // reviewDelegate renders reviewItem rows through the huh theme.
-type reviewDelegate struct{ theme *huh.Styles }
+type reviewDelegate struct {
+	theme *huh.Styles
+	// warn styles the "required" markers and err the Continue
+	// validation message; huh ships neither as a theme style, so
+	// both are built light/dark-aware in newReviewDelegate.
+	warn, err lipgloss.Style
+}
+
+// newReviewDelegate builds the review delegate's marker styles. The
+// yellows differ per background for readability; err reuses the
+// huh Charm theme's error reds so the message matches form errors.
+func newReviewDelegate(styles *huh.Styles, isDark bool) reviewDelegate {
+	lightDark := lipgloss.LightDark(isDark)
+	return reviewDelegate{
+		theme: styles,
+		warn:  lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("130"), lipgloss.Color("214"))),
+		err:   lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("#FF4672"), lipgloss.Color("#ED567A"))),
+	}
+}
 
 func (reviewDelegate) Height() int { return 1 }
 
@@ -47,6 +69,9 @@ func (d reviewDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	cursor := d.theme.Focused.SelectSelector.String()
 	if ri.action {
 		// The Continue item renders as the theme's action button.
+		if ri.err != "" {
+			fmt.Fprintln(w, strings.Repeat(" ", lipgloss.Width(cursor))+d.err.Render(ri.err))
+		}
 		style := d.theme.Blurred.BlurredButton
 		if index == m.Index() {
 			fmt.Fprint(w, cursor)
@@ -71,8 +96,8 @@ func (d reviewDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	if ri.sub != "" {
 		fmt.Fprintln(w)
 		sub := "       " + ri.sub
-		if ri.subError {
-			fmt.Fprint(w, d.theme.Focused.ErrorMessage.Render(sub))
+		if ri.subWarn {
+			fmt.Fprint(w, d.warn.Render(sub))
 		} else {
 			fmt.Fprint(w, d.theme.Focused.Description.Render(sub))
 		}
@@ -95,25 +120,25 @@ func credsSummary(c api.Credentials) string {
 	}
 }
 
-// credsSub renders the credentials row's sub line.
-func credsSub(c api.Credentials) (string, bool) {
+// credsSub renders the credentials row's sub line: the source
+// summary, or — when the credentials are a prerequisite and missing —
+// the "required" marker (second return reports the warning).
+func credsSub(c api.Credentials, required bool) (string, bool) {
 	switch {
 	case c.SecretName != "":
-		return "Selected secret: " + c.SecretName, true
+		return "Selected secret: " + c.SecretName, false
 	case c.Username != "" && c.Password != "":
-		return "Username: " + c.Username + ", password: " + maskPassword(c.Password), true
+		return "Username: " + c.Username + ", password: " + maskPassword(c.Password), false
+	case required:
+		return requiredSub, true
 	default:
 		return "", false
 	}
 }
 
-// poolingCredsComplete reports whether the pooling credentials are
-// provided; trivially true when pooling is not selected. The review
-// screen gates its Continue action on it.
-func poolingCredsComplete(b api.Backend) bool {
-	return !slices.Contains(b.Components(), api.ComponentPooling) ||
-		b.PoolingCredentials().Provided()
-}
+// requiredSub marks a prerequisite the user still has to provide;
+// rendered yellow by the review delegate.
+const requiredSub = "⚠ required"
 
 // maskedPasswordMax caps the bullet count so long passwords don't blow
 // up the review row.
@@ -150,27 +175,28 @@ func chartVersionDisplay(version, latestVersion string) string {
 }
 
 // reviewItems builds the review rows from the backend's committed
-// state.
-func reviewItems(b api.Backend) []list.Item {
+// state; reviewErr — the backend's Continue validation message —
+// rides the Continue action and renders above its button.
+func reviewItems(b api.Backend, reviewErr string) []list.Item {
 	agentCreds := b.AgentCredentials()
 	pooling := b.PoolingCredentials()
 	latestVersion := b.LatestChartVersion()
+
+	// The agent credentials are only a prerequisite when db-agent is
+	// enabled; pooling's row exists only when pooling is.
+	agentRow := reviewItem{
+		label:  "Agent credentials:",
+		value:  credsSummary(agentCreds),
+		target: screenAgentCreds,
+	}
+	agentRow.sub, agentRow.subWarn = credsSub(agentCreds, slices.Contains(b.Components(), api.ComponentDBAgent))
+
 	rows := []reviewItem{
 		{label: "Kubectl context:", value: emptyDash(b.KubeContext()), target: screenKubeContext},
 		{label: "Target namespace:", value: emptyDash(b.Namespace()), target: screenNamespace},
 		{label: "Chart version:", value: chartVersionDisplay(b.ChartVersion(), latestVersion), target: screenChartVersion},
-		{label: "Agent credentials:", value: credsSummary(agentCreds), target: screenAgentCreds},
+		agentRow,
 		{label: "Components to install:", value: emptyDash(strings.Join(b.Components(), ", ")), target: screenComponents},
-	}
-
-	if sub, ok := credsSub(agentCreds); ok {
-		for i := range rows {
-			if rows[i].target == screenAgentCreds {
-				rows[i].sub = sub
-
-				break
-			}
-		}
 	}
 
 	if slices.Contains(b.Components(), api.ComponentPooling) {
@@ -179,18 +205,14 @@ func reviewItems(b api.Backend) []list.Item {
 			value:  credsSummary(pooling),
 			target: screenPoolingCreds,
 		}
-		if sub, ok := credsSub(pooling); ok {
-			row.sub = sub
-		} else {
-			row.sub = "⚠ not provided"
-			row.subError = true
-		}
+		row.sub, row.subWarn = credsSub(pooling, true)
 		rows = append(rows, row)
 	}
 
 	rows = append(rows, reviewItem{
 		label:  "Continue",
 		action: true,
+		err:    reviewErr,
 	})
 
 	out := make([]list.Item, 0, len(rows))
@@ -202,13 +224,17 @@ func reviewItems(b api.Backend) []list.Item {
 }
 
 // handleReview: Enter enters the selected section, or — on the
-// Continue item — finalizes the install, gated on
-// poolingCredsComplete.
+// Continue item — finalizes the install after the backend validates
+// every prerequisite; a failure renders the message above the
+// button instead of proceeding.
 func (m *Model) handleReview(msg tea.KeyPressMsg) tea.Cmd {
 	if isConfirmAction(msg) {
 		if it, ok := m.reviewList.SelectedItem().(reviewItem); ok {
 			if it.action {
-				if !poolingCredsComplete(m.backend) {
+				if err := m.backend.Validate(); err != nil {
+					m.reviewError = err.Error()
+					m.refreshReviewList()
+
 					return nil
 				}
 				m.done = true

@@ -55,7 +55,7 @@ func TestReviewItemsChartVersionLatestSuffix(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			b := &fakeBackend{chartVersion: tt.version, latest: tt.latest}
-			row, ok := findRow(reviewItems(b), "Chart version:")
+			row, ok := findRow(reviewItems(b, ""), "Chart version:")
 			if !ok {
 				t.Fatal("chart version row not found")
 			}
@@ -71,7 +71,7 @@ func TestReviewItemsPoolingRow(t *testing.T) {
 
 	t.Run("hidden without pooling", func(t *testing.T) {
 		b := &fakeBackend{components: []string{api.ComponentDBAgent}}
-		if _, ok := findRow(reviewItems(b), "Pooling credentials:"); ok {
+		if _, ok := findRow(reviewItems(b, ""), "Pooling credentials:"); ok {
 			t.Error("pooling credentials row present without pooling enabled")
 		}
 	})
@@ -81,23 +81,23 @@ func TestReviewItemsPoolingRow(t *testing.T) {
 			components:   pooling,
 			poolingCreds: api.Credentials{SecretName: "pooling-creds"},
 		}
-		row, ok := findRow(reviewItems(b), "Pooling credentials:")
+		row, ok := findRow(reviewItems(b, ""), "Pooling credentials:")
 		if !ok {
 			t.Fatal("pooling credentials row not found")
 		}
-		if row.value != "existing secret" || row.sub != "Selected secret: pooling-creds" || row.subError {
-			t.Errorf("pooling row = %+v, want existing-secret summary without error", row)
+		if row.value != "existing secret" || row.sub != "Selected secret: pooling-creds" || row.subWarn {
+			t.Errorf("pooling row = %+v, want existing-secret summary without warning", row)
 		}
 	})
 
 	t.Run("missing credentials", func(t *testing.T) {
 		b := &fakeBackend{components: pooling}
-		row, ok := findRow(reviewItems(b), "Pooling credentials:")
+		row, ok := findRow(reviewItems(b, ""), "Pooling credentials:")
 		if !ok {
 			t.Fatal("pooling credentials row not found")
 		}
-		if !row.subError {
-			t.Errorf("pooling row = %+v, want subError with missing credentials", row)
+		if row.sub != "⚠ required" || !row.subWarn {
+			t.Errorf("pooling row = %+v, want the yellow required marker", row)
 		}
 	})
 }
@@ -108,7 +108,7 @@ func TestReviewItemsAgentCredsSub(t *testing.T) {
 			agentCreds: api.Credentials{SecretName: "agent-secret"},
 			components: []string{api.ComponentDBAgent},
 		}
-		row, ok := findRow(reviewItems(b), "Agent credentials:")
+		row, ok := findRow(reviewItems(b, ""), "Agent credentials:")
 		if !ok {
 			t.Fatal("agent credentials row not found")
 		}
@@ -122,7 +122,7 @@ func TestReviewItemsAgentCredsSub(t *testing.T) {
 			agentCreds: api.Credentials{Username: "agent", Password: "secret"},
 			components: []string{api.ComponentDBAgent},
 		}
-		row, ok := findRow(reviewItems(b), "Agent credentials:")
+		row, ok := findRow(reviewItems(b, ""), "Agent credentials:")
 		if !ok {
 			t.Fatal("agent credentials row not found")
 		}
@@ -131,25 +131,47 @@ func TestReviewItemsAgentCredsSub(t *testing.T) {
 		}
 	})
 
-	t.Run("unset shows no sub", func(t *testing.T) {
+	t.Run("unset with db-agent shows the required marker", func(t *testing.T) {
 		b := &fakeBackend{components: []string{api.ComponentDBAgent}}
-		row, ok := findRow(reviewItems(b), "Agent credentials:")
+		row, ok := findRow(reviewItems(b, ""), "Agent credentials:")
 		if !ok {
 			t.Fatal("agent credentials row not found")
 		}
-		if row.value != unsetPlaceholder || row.sub != "" {
-			t.Errorf("agent row = %+v, want unset placeholder without sub", row)
+		if row.value != unsetPlaceholder || row.sub != "⚠ required" || !row.subWarn {
+			t.Errorf("agent row = %+v, want unset placeholder with the yellow required marker", row)
+		}
+	})
+
+	t.Run("unset without db-agent is not required", func(t *testing.T) {
+		b := &fakeBackend{components: []string{api.ComponentDBProxy}}
+		row, ok := findRow(reviewItems(b, ""), "Agent credentials:")
+		if !ok {
+			t.Fatal("agent credentials row not found")
+		}
+		if row.sub != "" || row.subWarn {
+			t.Errorf("agent row = %+v, want no required marker without db-agent", row)
 		}
 	})
 }
 
 func TestReviewItemsContinueRow(t *testing.T) {
-	items := reviewItems(&fakeBackend{components: []string{api.ComponentDBAgent}})
+	items := reviewItems(&fakeBackend{components: []string{api.ComponentDBAgent}}, "")
 	last, ok := items[len(items)-1].(reviewItem)
 	if !ok {
 		t.Fatalf("last review item is %T, want reviewItem", items[len(items)-1])
 	}
-	if !last.action || last.label != "Continue" {
-		t.Errorf("last row = %+v, want the Continue action", last)
+	if !last.action || last.label != "Continue" || last.err != "" {
+		t.Errorf("last row = %+v, want the Continue action without a message", last)
+	}
+}
+
+func TestReviewItemsContinueRowCarriesValidationMessage(t *testing.T) {
+	const msg = "agent credentials are required; pooling credentials are required"
+	last, ok := findRow(reviewItems(&fakeBackend{components: []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling}}, msg), "Continue")
+	if !ok {
+		t.Fatal("continue row not found")
+	}
+	if last.err != msg {
+		t.Errorf("continue row err = %q, want %q", last.err, msg)
 	}
 }
