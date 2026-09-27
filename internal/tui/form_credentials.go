@@ -31,15 +31,17 @@ func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title 
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
+				Title(title).
 				Options(
 					huh.NewOption("Existing Kubernetes Secret", mode_secret).Selected(pickedSecretMode == mode_secret),
 					huh.NewOption("Username and password", mode_user).Selected(pickedSecretMode == mode_secret),
 				).
 				Value(modePtr),
-		).Title(title),
+		),
 
 		huh.NewGroup(
 			huh.NewSelect[string]().
+				Title(title).
 				Description("Pick from existing secrets in namespace "+b.Namespace()).
 				OptionsFunc(func() []huh.Option[string] {
 					secrets := b.Secrets()
@@ -57,7 +59,6 @@ func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title 
 				}, pickedSecretMode).
 				Value(&creds.SecretName),
 		).
-			Title(title).
 			WithHideFunc(func() bool {
 				if !(*modePtr == mode_secret && !fallbackToManualEdit) {
 					return true
