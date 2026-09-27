@@ -80,8 +80,8 @@ The wizard requires a real terminal; it cannot be run from a pipe or CI.`,
 			"When unset, db-agent and db-proxy are preselected and the components screen is fully interactive.")
 	cmd.Flags().BoolVar(&cfg.DryRun, "dry-run", false,
 		"Print the exact 'helm upgrade --install' command instead of executing it.")
-	cmd.Flags().BoolVar(&cfg.SlowNetwork, "slow-network", false,
-		"Add a 5s delay to every networked call (kubectl and the chart repository) to simulate a slow network, for testing the UI.")
+	cmd.Flags().BoolVar(&cfg.SimulateSlowNetwork, "slow-network", false,
+		"Add a 2s delay to every networked call (kubectl and the chart repository) to simulate a slow network, for testing the UI.")
 
 	return cmd
 }
@@ -107,8 +107,8 @@ func run(ctx context.Context, cfg backend.Config) error {
 		return errNotATTY
 	}
 
-	repo := backend.NewHelmRepoClient(&http.Client{}, cfg.ChartRepo, cfg.SlowNetwork)
-	k := backend.RealKubectl{SlowNetwork: cfg.SlowNetwork}
+	repo := backend.NewHelmRepoClient(&http.Client{}, cfg.ChartRepo, cfg.SimulateSlowNetwork)
+	k := backend.RealKubectl{SimulateSlowNetwork: cfg.SimulateSlowNetwork}
 	helm := backend.DefaultHelmRunner{}
 
 	w, err := backend.NewWizard(ctx, cfg, repo, k, helm)

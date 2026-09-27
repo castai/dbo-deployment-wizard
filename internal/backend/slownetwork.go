@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-// slowNetworkDelay is the per-call delay the --slow-network flag
-// injects, to exercise the UI against a slow network locally.
-const slowNetworkDelay = 2 * time.Second
+// simulateSlowNetworkDelay is the per-call delay the --slow-network
+// flag injects, to exercise the UI against a slow network locally.
+const simulateSlowNetworkDelay = 2 * time.Second
 
 // sleepCtx pauses for d, or until ctx is canceled.
 func sleepCtx(ctx context.Context, d time.Duration) error {

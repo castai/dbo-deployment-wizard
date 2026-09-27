@@ -22,16 +22,17 @@ type Kubectl interface {
 	EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error
 }
 
-// RealKubectl invokes the kubectl binary on PATH. SlowNetwork delays
-// every call by slowNetworkDelay — the --slow-network UI testing aid.
+// RealKubectl invokes the kubectl binary on PATH. SimulateSlowNetwork
+// delays every call by simulateSlowNetworkDelay — the --slow-network
+// UI testing aid.
 type RealKubectl struct {
-	SlowNetwork bool
+	SimulateSlowNetwork bool
 }
 
 // run executes `kubectl <args>` and returns combined stdout/stderr.
 func (k RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
-	if k.SlowNetwork {
-		if err := sleepCtx(ctx, slowNetworkDelay); err != nil {
+	if k.SimulateSlowNetwork {
+		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
 			return nil, err
 		}
 	}
@@ -106,8 +107,8 @@ type secretMetadata struct {
 // given data. The manifest travels via stdin, so the values never
 // appear on the argv.
 func (k RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error {
-	if k.SlowNetwork {
-		if err := sleepCtx(ctx, slowNetworkDelay); err != nil {
+	if k.SimulateSlowNetwork {
+		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
 			return err
 		}
 	}
