@@ -163,22 +163,18 @@ func (m *Model) primeScreen(s screen) {
 	}
 }
 
-// Init is part of tea.Model.
-func (m *Model) Init() tea.Cmd { return nil }
+func (m *Model) Init() tea.Cmd {
+	return repaintIn()
+}
 
-// Update intercepts KeyPressMsg and background-color messages; every
-// other message — window sizes, and bracketed paste, which arrives as
-// PasteMsg rather than KeyPressMsg — reaches the active form so it can
-// size itself and apply pastes. Every screen switch batches in a
-// ClearScreen so the previous screen's frame is replaced instead of
-// left behind — the app renders inline, without the alt screen.
-//
 //nolint:ireturn // bubbletea v2 Model.Update mandates a tea.Model return.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	before := m.state
 	var cmd tea.Cmd
 
 	switch typed := msg.(type) {
+	case repaintMsg:
+		cmd = tea.Batch(tea.ClearScreen, repaintIn())
 	case tea.KeyPressMsg:
 		_, cmd = m.handleKey(typed)
 	case tea.BackgroundColorMsg:

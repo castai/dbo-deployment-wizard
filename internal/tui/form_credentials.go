@@ -57,6 +57,7 @@ func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title 
 						return huh.NewOption(s, s).Selected(s == creds.SecretName)
 					})
 				}, pickedSecretMode).
+				Height(10).
 				Value(&creds.SecretName),
 		).
 			WithHideFunc(func() bool {
