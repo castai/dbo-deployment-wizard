@@ -17,8 +17,8 @@ type Backend interface {
 	PoolingCredentials() Credentials
 	// Components returns the enabled components in selection order.
 	Components() []string
-	KubeContexts() []string
-	ChartVersions() []HelmChartVersion
+	KubeContexts() ([]string, error)
+	ChartVersions() ([]HelmChartVersion, error)
 	// LatestChartVersion returns "" when the repo lookup failed.
 	LatestChartVersion() string
 	// Secrets returns the Secret names in the selected context and

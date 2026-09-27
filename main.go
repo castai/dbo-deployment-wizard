@@ -65,6 +65,8 @@ The wizard requires a real terminal; it cannot be run from a pipe or CI.`,
 		"URL of the Helm chart repository index.yaml used to list chart versions.")
 	cmd.Flags().StringVar(&cfg.ChartName, "chart-name", cfg.ChartName,
 		"Name of the Helm chart to install.")
+	cmd.Flags().StringVar(&cfg.ChartVersion, "chart-version", cfg.ChartVersion,
+		"Helm chart version to install.")
 	cmd.Flags().StringVar(&cfg.ReleaseName, "release-name", cfg.ReleaseName,
 		"Helm release name to use for the install.")
 	cmd.Flags().StringVar(&cfg.KubeContext, "kubecontext", "",
@@ -78,6 +80,8 @@ The wizard requires a real terminal; it cannot be run from a pipe or CI.`,
 			"When unset, db-agent and db-proxy are preselected and the components screen is fully interactive.")
 	cmd.Flags().BoolVar(&cfg.DryRun, "dry-run", false,
 		"Print the exact 'helm upgrade --install' command instead of executing it.")
+	cmd.Flags().BoolVar(&cfg.SimulateSlowNetwork, "slow-network", false,
+		"Add a 2s delay to every networked call (kubectl and the chart repository) to simulate a slow network, for testing the UI.")
 
 	return cmd
 }
@@ -103,8 +107,8 @@ func run(ctx context.Context, cfg backend.Config) error {
 		return errNotATTY
 	}
 
-	repo := backend.NewHelmRepoClient(&http.Client{}, cfg.ChartRepo)
-	k := backend.RealKubectl{}
+	repo := backend.NewHelmRepoClient(&http.Client{}, cfg.ChartRepo, cfg.SimulateSlowNetwork)
+	k := backend.RealKubectl{SimulateSlowNetwork: cfg.SimulateSlowNetwork}
 	helm := backend.DefaultHelmRunner{}
 
 	w, err := backend.NewWizard(ctx, cfg, repo, k, helm)

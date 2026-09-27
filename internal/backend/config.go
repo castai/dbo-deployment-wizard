@@ -37,6 +37,10 @@ type Config struct {
 
 	// DryRun prints the exact helm command instead of executing it.
 	DryRun bool
+
+	// SimulateSlowNetwork delays every networked call by a fixed 2s —
+	// a local UI-testing aid, not a deployment parameter.
+	SimulateSlowNetwork bool
 }
 
 // Static defaults; the discovery-based fields (KubeContext,

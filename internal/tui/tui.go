@@ -77,12 +77,6 @@ type Model struct {
 	agentCredsForm   *huh.Form
 	poolingCredsForm *huh.Form
 
-	// agentCredsMode / poolingCredsMode are the sources the credentials
-	// forms' selects picked; the group hide funcs read them live and
-	// completeForm uses them to pick the committed source.
-	agentCredsMode   string
-	poolingCredsMode string
-
 	done   bool
 	cancel bool
 }
@@ -108,10 +102,14 @@ func newModel(b api.Backend) *Model {
 	m.reviewList.SetShowStatusBar(false)
 	m.reviewList.SetShowTitle(false)
 	m.reviewList.DisableQuitKeybindings()
+	m.reviewList.InfiniteScrolling = true
 	m.refreshReviewList()
 
+	// Start on the Continue action
+	m.reviewList.Select(len(m.reviewList.Items()) - 1)
+
 	m.syncDraft()
-	m.buildForms(nil)
+	m.buildForms()
 
 	return m
 }
@@ -127,15 +125,15 @@ func (m *Model) syncDraft() {
 	}
 }
 
-// buildForms builds every embedded form; the credentials screens
-// re-discover Secrets on entry in primeScreen.
-func (m *Model) buildForms(secrets []string) {
-	m.kubeContextForm = newKubeContextForm(m.theme, m.backend.KubeContexts(), &m.draft)
-	m.chartVersionForm = newChartVersionForm(m.theme, m.backend.ChartVersions(), &m.draft)
+// buildForms builds every embedded form; the credentials screens'
+// Secret discovery is huh's dynamic options (see newCredsForm).
+func (m *Model) buildForms() {
+	m.kubeContextForm = newKubeContextForm(m.theme, m.backend, &m.draft)
+	m.chartVersionForm = newChartVersionForm(m.theme, m.backend, &m.draft)
 	m.namespaceForm = newNamespaceForm(m.theme, &m.draft)
 	m.componentsForm = newComponentsForm(m.theme, &m.draft)
-	m.agentCredsForm = newCredsForm(m.theme, &m.agentCredsMode, secrets, &m.draft.agentCreds, "Agent credentials")
-	m.poolingCredsForm = newCredsForm(m.theme, &m.poolingCredsMode, secrets, &m.draft.poolingCreds, "Pooling credentials")
+	m.agentCredsForm = newCredsForm(m.theme, m.backend, &m.draft.agentCreds, "Agent credentials")
+	m.poolingCredsForm = newCredsForm(m.theme, m.backend, &m.draft.poolingCreds, "Pooling credentials")
 }
 
 // primeScreen re-syncs the draft and rebuilds the screen's form (huh
@@ -146,13 +144,13 @@ func (m *Model) primeScreen(s screen) {
 		m.refreshReviewList()
 	case screenKubeContext:
 		m.syncDraft()
-		m.kubeContextForm = newKubeContextForm(m.theme, m.backend.KubeContexts(), &m.draft)
+		m.kubeContextForm = newKubeContextForm(m.theme, m.backend, &m.draft)
 	case screenChartVersion:
 		m.syncDraft()
-		m.chartVersionForm = newChartVersionForm(m.theme, m.backend.ChartVersions(), &m.draft)
+		m.chartVersionForm = newChartVersionForm(m.theme, m.backend, &m.draft)
 	case screenAgentCreds:
 		m.syncDraft()
-		m.agentCredsForm = newCredsForm(m.theme, &m.agentCredsMode, m.backend.Secrets(), &m.draft.agentCreds, "Agent credentials")
+		m.agentCredsForm = newCredsForm(m.theme, m.backend, &m.draft.agentCreds, "Agent credentials")
 	case screenComponents:
 		m.syncDraft()
 		m.componentsForm = newComponentsForm(m.theme, &m.draft)
@@ -161,45 +159,46 @@ func (m *Model) primeScreen(s screen) {
 		m.namespaceForm = newNamespaceForm(m.theme, &m.draft)
 	case screenPoolingCreds:
 		m.syncDraft()
-		m.poolingCredsForm = newCredsForm(m.theme, &m.poolingCredsMode, m.backend.Secrets(), &m.draft.poolingCreds, "Pooling credentials")
+		m.poolingCredsForm = newCredsForm(m.theme, m.backend, &m.draft.poolingCreds, "Pooling credentials")
 	}
 }
 
-// Init is part of tea.Model.
-func (m *Model) Init() tea.Cmd { return nil }
+func (m *Model) Init() tea.Cmd {
+	return repaintIn()
+}
 
-// Update intercepts KeyPressMsg and background-color messages; every
-// other message — window sizes, and bracketed paste, which arrives as
-// PasteMsg rather than KeyPressMsg — reaches the active form so it can
-// size itself and apply pastes.
-//
 //nolint:ireturn // bubbletea v2 Model.Update mandates a tea.Model return.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if kpm, ok := msg.(tea.KeyPressMsg); ok {
-		mm, cmd := m.handleKey(kpm)
+	before := m.state
+	var cmd tea.Cmd
 
-		return mm, cmd
-	}
-	if bgm, ok := msg.(tea.BackgroundColorMsg); ok {
-		_, _ = forwardToForm(&m.kubeContextForm, bgm)
-		_, _ = forwardToForm(&m.poolingCredsForm, bgm)
-		_, _ = forwardToForm(&m.chartVersionForm, bgm)
-		_, _ = forwardToForm(&m.namespaceForm, bgm)
-		_, _ = forwardToForm(&m.componentsForm, bgm)
-		_, _ = forwardToForm(&m.agentCredsForm, bgm)
-
-		return m, nil
-	}
-	if f := m.activeForm(); f != nil {
-		cmd, done := forwardToForm(f, msg)
-		if done {
-			m.completeForm()
+	switch typed := msg.(type) {
+	case repaintMsg:
+		cmd = tea.Batch(tea.ClearScreen, repaintIn())
+	case tea.KeyPressMsg:
+		_, cmd = m.handleKey(typed)
+	case tea.BackgroundColorMsg:
+		_, _ = forwardToForm(&m.kubeContextForm, typed)
+		_, _ = forwardToForm(&m.poolingCredsForm, typed)
+		_, _ = forwardToForm(&m.chartVersionForm, typed)
+		_, _ = forwardToForm(&m.namespaceForm, typed)
+		_, _ = forwardToForm(&m.componentsForm, typed)
+		_, _ = forwardToForm(&m.agentCredsForm, typed)
+	default:
+		if f := m.activeForm(); f != nil {
+			var done bool
+			cmd, done = forwardToForm(f, msg)
+			if done {
+				m.completeForm()
+			}
 		}
-
-		return m, cmd
 	}
 
-	return m, nil
+	if m.state != before {
+		cmd = tea.Batch(cmd, tea.ClearScreen)
+	}
+
+	return m, cmd
 }
 
 // handleKey is the central dispatcher: Ctrl+C aborts from anywhere;
@@ -319,21 +318,11 @@ func (m *Model) completeForm() {
 	case screenComponents:
 		_ = m.backend.SetComponents(m.draft.components)
 	case screenAgentCreds:
-		m.backend.SetAgentCredentials(credentialsFromDraft(m.draft.agentCreds, m.agentCredsMode))
+		m.backend.SetAgentCredentials(m.draft.agentCreds)
 	case screenPoolingCreds:
-		m.backend.SetPoolingCredentials(credentialsFromDraft(m.draft.poolingCreds, m.poolingCredsMode))
+		m.backend.SetPoolingCredentials(m.draft.poolingCreds)
 	}
 	m.goToReview()
-}
-
-// credentialsFromDraft keeps only the source the form's select picked,
-// so the committed struct never carries both.
-func credentialsFromDraft(c api.Credentials, mode string) api.Credentials {
-	if mode == credsModeUserPassLabel {
-		return api.Credentials{Username: c.Username, Password: c.Password}
-	}
-
-	return api.Credentials{SecretName: c.SecretName}
 }
 
 // Run starts the bubbletea program. The install itself runs after the

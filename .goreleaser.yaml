@@ -1,0 +1,31 @@
+version: 2
+
+project_name: dbo-deployment-wizard
+
+builds:
+  - id: dbo-deployment-wizard
+    main: .
+    binary: dbo-deployment-wizard
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    hooks:
+      post:
+        # Render the release version into the wrapper script that gets attached
+        # to the release (see release.extra_files).
+        - sh -c 'sed "s/^VERSION=.*/VERSION=\"{{ .Version }}\"/" wrapper_cmd.sh > dist/wrapper_cmd.sh'
+
+release:
+  # Releases are created in the GitHub UI; goreleaser only attaches artifacts.
+  mode: keep-existing
+  extra_files:
+    - glob: ./dist/wrapper_cmd.sh

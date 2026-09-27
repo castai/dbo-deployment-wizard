@@ -30,31 +30,20 @@ func versionLabel(v api.HelmChartVersion, latest bool) string {
 // newChartVersionForm builds the chart-version form with release-date
 // labels; it degrades to a free-text Input when the repo lookup
 // returned no versions.
-func newChartVersionForm(theme huh.Theme, versions []api.HelmChartVersion, d *draft) *huh.Form {
-	if len(versions) == 0 {
-		return huh.NewForm(
-			huh.NewGroup(
-				huh.NewInput().
-					Title("Chart version").
-					Description("Could not list versions from the chart repository; enter one manually.").
-					Placeholder("e.g. 1.4.2").
-					Value(&d.chartVersion),
-			).Title("Chart version"),
-		).WithTheme(theme)
-	}
-
-	options := lo.Map(versions, func(v api.HelmChartVersion, i int) huh.Option[string] {
-		return huh.NewOption(versionLabel(v, i == 0), v.Number).Selected(v.Number == d.chartVersion)
-	})
-
+func newChartVersionForm(theme huh.Theme, b api.Backend, d *draft) *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Chart version").
-				Description("Release date shown per version; the newest is marked latest.").
-				Options(options...).
+				Description("Pick a Helm chart version to use.").
+				OptionsFunc(func() []huh.Option[string] {
+					versions, _ := b.ChartVersions()
+					return lo.Map(versions, func(v api.HelmChartVersion, i int) huh.Option[string] {
+						return huh.NewOption(versionLabel(v, i == 0), v.Number).Selected(v.Number == d.chartVersion)
+					})
+				}, d.chartVersion).
 				Value(&d.chartVersion),
-		).Title("Chart version"),
+		),
 	).WithTheme(theme)
 }
 

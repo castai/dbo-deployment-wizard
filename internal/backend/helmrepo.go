@@ -25,9 +25,12 @@ const (
 )
 
 // HelmRepoClient fetches and caches a Helm chart repository index.
+// simulateSlowNetwork delays every index fetch by
+// simulateSlowNetworkDelay — the --slow-network UI testing aid.
 type HelmRepoClient struct {
-	httpClient *http.Client
-	indexURL   string
+	httpClient          *http.Client
+	indexURL            string
+	simulateSlowNetwork bool
 
 	mu        sync.Mutex
 	index     map[string][]api.HelmChartVersion
@@ -36,7 +39,8 @@ type HelmRepoClient struct {
 
 // NewHelmRepoClient returns a client reading index.yaml from indexURL;
 // nil httpClient and empty indexURL fall back to defaults.
-func NewHelmRepoClient(httpClient *http.Client, indexURL string) *HelmRepoClient {
+// simulateSlowNetwork delays index fetches by simulateSlowNetworkDelay.
+func NewHelmRepoClient(httpClient *http.Client, indexURL string, simulateSlowNetwork bool) *HelmRepoClient {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultHTTPTimeout}
 	}
@@ -44,7 +48,7 @@ func NewHelmRepoClient(httpClient *http.Client, indexURL string) *HelmRepoClient
 		indexURL = DefaultIndexURL
 	}
 
-	return &HelmRepoClient{httpClient: httpClient, indexURL: indexURL}
+	return &HelmRepoClient{httpClient: httpClient, indexURL: indexURL, simulateSlowNetwork: simulateSlowNetwork}
 }
 
 // ListVersions returns every published version of chartName, newest
@@ -108,6 +112,11 @@ type helmEntry struct {
 }
 
 func (c *HelmRepoClient) fetchIndex(ctx context.Context) (map[string][]api.HelmChartVersion, error) {
+	if c.simulateSlowNetwork {
+		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
+			return nil, err
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.indexURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
