@@ -102,7 +102,11 @@ func newModel(b api.Backend) *Model {
 	m.reviewList.SetShowStatusBar(false)
 	m.reviewList.SetShowTitle(false)
 	m.reviewList.DisableQuitKeybindings()
+	m.reviewList.InfiniteScrolling = true
 	m.refreshReviewList()
+
+	// Start on the Continue action
+	m.reviewList.Select(len(m.reviewList.Items()) - 1)
 
 	m.syncDraft()
 	m.buildForms()

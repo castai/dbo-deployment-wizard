@@ -20,7 +20,7 @@ func (m *Model) page(title, body, footer string) string {
 // helpFooter returns the help line for the given screen; on review the
 // Enter hint names the action the cursor is on.
 func (m *Model) helpFooter(s screen) string {
-	parts := []string{m.keyChip("↑/↓") + " move"}
+	parts := []string{m.keyChip("↑/↓") + " pick option to edit"}
 	if s == screenReview {
 		enterHint := "edit"
 		if it, ok := m.reviewList.SelectedItem().(reviewItem); ok && it.action {

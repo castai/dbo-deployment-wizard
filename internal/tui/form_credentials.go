@@ -40,7 +40,6 @@ func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title 
 
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Select secret").
 				Description("Pick from existing secrets in namespace "+b.Namespace()).
 				OptionsFunc(func() []huh.Option[string] {
 					secrets := b.Secrets()
@@ -70,7 +69,7 @@ func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title 
 
 		huh.NewGroup(
 			huh.NewInput().
-				Title("Secret name").
+				Title("Enter existing secret name. Must exist in namespace "+b.Namespace()).
 				Value(&creds.SecretName),
 		).
 			Title(title).

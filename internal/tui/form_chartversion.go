@@ -35,7 +35,7 @@ func newChartVersionForm(theme huh.Theme, b api.Backend, d *draft) *huh.Form {
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Chart version").
-				Description("Release date shown per version; the newest is marked latest.").
+				Description("Pick a Helm chart version to use.").
 				OptionsFunc(func() []huh.Option[string] {
 					versions, _ := b.ChartVersions()
 					return lo.Map(versions, func(v api.HelmChartVersion, i int) huh.Option[string] {
@@ -43,7 +43,7 @@ func newChartVersionForm(theme huh.Theme, b api.Backend, d *draft) *huh.Form {
 					})
 				}, d.chartVersion).
 				Value(&d.chartVersion),
-		).Title("Chart version"),
+		),
 	).WithTheme(theme)
 }
 
