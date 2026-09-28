@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"errors"
-	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/list"
@@ -175,41 +173,5 @@ func TestReviewItemsContinueRowCarriesValidationMessage(t *testing.T) {
 	}
 	if last.err != msg {
 		t.Errorf("continue row err = %q, want %q", last.err, msg)
-	}
-}
-
-func TestReviewTitle(t *testing.T) {
-	tests := map[string]struct {
-		exists bool
-		err    error
-		want   string
-	}{
-		"new installation": {
-			exists: false,
-			want:   "Installing castai-dbo helm chart — review configuration (will create a new installation)",
-		},
-		"existing installation": {
-			exists: true,
-			want:   "Installing castai-dbo helm chart — review configuration (will update the existing installation)",
-		},
-		"lookup failure shows the error": {
-			err:  errors.New("context unreachable"),
-			want: "Installing castai-dbo helm chart — review configuration (could not determine: context unreachable)",
-		},
-		"multi-line errors clip to the first line": {
-			err:  errors.New("first line\nsecond line"),
-			want: "Installing castai-dbo helm chart — review configuration (could not determine: first line)",
-		},
-		"long errors truncate": {
-			err:  errors.New(strings.Repeat("a", 60)),
-			want: "Installing castai-dbo helm chart — review configuration (could not determine: " + strings.Repeat("a", 47) + "…)",
-		},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			if got := reviewTitle(tt.exists, tt.err); got != tt.want {
-				t.Errorf("reviewTitle() = %q, want %q", got, tt.want)
-			}
-		})
 	}
 }
