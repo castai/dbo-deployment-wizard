@@ -186,13 +186,11 @@ func reviewTitle(b api.Backend) string {
 	exists, err := b.DeploymentExists()
 	switch {
 	case err != nil:
-		message := truncate(err.Error(), 100)
-
-		return fmt.Sprintf("%s", message)
+		return truncate(err.Error(), 100)
 	case exists:
-		return "Installing Helm deployment " + b.ReleaseName()
-	default:
 		return "Updating Helm deployment " + b.ReleaseName()
+	default:
+		return "Installing Helm deployment " + b.ReleaseName()
 	}
 }
 
