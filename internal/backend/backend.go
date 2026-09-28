@@ -29,6 +29,10 @@ type Wizard struct {
 	latestVersion string
 }
 
+func (w *Wizard) ReleaseName() string {
+	return w.cfg.ReleaseName
+}
+
 // Compile-time check: Wizard implements the full Backend contract.
 var _ api.Backend = (*Wizard)(nil)
 

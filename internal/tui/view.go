@@ -80,7 +80,7 @@ func wrapView(body string) tea.View {
 // its own title and help bar, so no page chrome is added.
 
 func (m *Model) viewReview() string {
-	return m.page(reviewTitle(m.backend.DeploymentExists()), m.reviewList.View(), m.helpFooter(m.state))
+	return m.page(reviewTitle(m.backend), m.reviewList.View(), m.helpFooter(m.state))
 }
 
 func (m *Model) viewKubeContext() string {

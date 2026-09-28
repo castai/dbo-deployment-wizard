@@ -178,6 +178,29 @@ func chartVersionDisplay(version, latestVersion string) string {
 	return emptyDash(version)
 }
 
+// reviewTitle renders the review screen's title; the suffix names
+// whether the committed coordinates hold an existing release the
+// install would upgrade, or none — a new installation it would
+// create — or, when the lookup fails, why.
+func reviewTitle(b api.Backend) string {
+	exists, err := b.DeploymentExists()
+	switch {
+	case err != nil:
+		message := truncate(firstLine(err.Error()), 48)
+		return fmt.Sprintf("Failed to determine if installing or upgrading %s: %s ", b.ReleaseName(), message)
+	case exists:
+		return "Installing Helm deployment " + b.ReleaseName()
+	default:
+		return "Updating Helm deployment " + b.ReleaseName()
+	}
+}
+
+// firstLine clips multi-line strings (kubectl errors) to their first line.
+func firstLine(s string) string {
+	before, _, _ := strings.Cut(s, "\n")
+	return before
+}
+
 // reviewItems builds the review rows from the backend's committed
 // state; reviewErr — the backend's Continue validation message —
 // rides the Continue action and renders above its button.

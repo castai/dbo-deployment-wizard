@@ -141,7 +141,7 @@ type HelmRunner interface {
 type DefaultHelmRunner struct{}
 
 // Argv prepends "helm" to the argv.
-func (DefaultHelmRunner) Argv(argv []string) []string {
+func (*DefaultHelmRunner) Argv(argv []string) []string {
 	out := make([]string, 0, len(argv)+1)
 	out = append(out, "helm")
 
@@ -150,7 +150,7 @@ func (DefaultHelmRunner) Argv(argv []string) []string {
 
 // Run executes `helm` with the given argv, forwarding stdout/stderr
 // when non-nil.
-func (DefaultHelmRunner) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) error {
+func (*DefaultHelmRunner) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) error {
 	helmPath, err := exec.LookPath("helm")
 	if err != nil {
 		return fmt.Errorf("helm binary not found on PATH: %w", err)

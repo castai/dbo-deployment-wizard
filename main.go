@@ -111,7 +111,7 @@ func run(ctx context.Context, cfg backend.Config) error {
 	k := backend.RealKubectl{SimulateSlowNetwork: cfg.SimulateSlowNetwork}
 	helm := backend.DefaultHelmRunner{}
 
-	w, err := backend.NewWizard(ctx, cfg, repo, k, helm)
+	w, err := backend.NewWizard(ctx, cfg, repo, &k, &helm)
 	if err != nil {
 		return err
 	}

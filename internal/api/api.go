@@ -13,6 +13,8 @@ type Backend interface {
 	KubeContext() string
 	Namespace() string
 	ChartVersion() string
+	ReleaseName() string
+
 	AgentCredentials() Credentials
 	PoolingCredentials() Credentials
 	// Components returns the enabled components in selection order.
@@ -27,8 +29,9 @@ type Backend interface {
 	// DeploymentExists reports whether the committed deployment
 	// coordinates — context, namespace, release name — already hold a
 	// helm release, i.e. whether Install would upgrade it rather
-	// than create a new installation
-	DeploymentExists() bool
+	// than create a new installation; a lookup failure returns the
+	// error and false.
+	DeploymentExists() (bool, error)
 
 	// --- commands ---
 

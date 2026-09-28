@@ -12,13 +12,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Kubectl abstracts the kubectl shell-outs: context resolution,
-// current-context lookup, Secret listing, and Secret creation.
-// RealKubectl is the production implementation; tests supply fakes.
+// Kubectl abstracts the kubectl shell-outs
 type Kubectl interface {
 	ListKubeContexts(ctx context.Context) ([]string, error)
 	CurrentKubeContext(ctx context.Context) (string, error)
 	ListSecrets(ctx context.Context, kubeContext, namespace string) ([]string, error)
+	HelmReleaseExists(ctx context.Context, kubeContext, namespace, releaseName string) (bool, error)
 	EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error
 }
 
@@ -27,10 +26,29 @@ type Kubectl interface {
 // UI testing aid.
 type RealKubectl struct {
 	SimulateSlowNetwork bool
+
+	// releaseCache memoizes HelmReleaseExists results by release
+	// coordinates; the UI re-checks on every review render.
+	releaseCache map[releaseKey]releaseLookup
+}
+
+// releaseKey identifies a helm release by its coordinates: the
+// namespace on a kubectl context.
+type releaseKey struct {
+	kubeContext string
+	namespace   string
+	releaseName string
+}
+
+// releaseLookup is one memoized HelmReleaseExists result; err is set
+// when the lookup failed.
+type releaseLookup struct {
+	exists bool
+	err    error
 }
 
 // run executes `kubectl <args>` and returns combined stdout/stderr.
-func (k RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
+func (k *RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
 	if k.SimulateSlowNetwork {
 		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
 			return nil, err
@@ -43,7 +61,7 @@ func (k RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
 
 // ListKubeContexts returns every context name; an empty result is an
 // error.
-func (k RealKubectl) ListKubeContexts(ctx context.Context) ([]string, error) {
+func (k *RealKubectl) ListKubeContexts(ctx context.Context) ([]string, error) {
 	out, err := k.run(ctx, "config", "get-contexts", "-o", "name")
 	if err != nil {
 		return nil, err
@@ -63,7 +81,7 @@ func (k RealKubectl) ListKubeContexts(ctx context.Context) ([]string, error) {
 
 // CurrentKubeContext returns the current context; an empty result
 // with no error is possible.
-func (k RealKubectl) CurrentKubeContext(ctx context.Context) (string, error) {
+func (k *RealKubectl) CurrentKubeContext(ctx context.Context) (string, error) {
 	out, err := k.run(ctx, "config", "current-context")
 	if err != nil {
 		return "", err
@@ -74,7 +92,7 @@ func (k RealKubectl) CurrentKubeContext(ctx context.Context) (string, error) {
 
 // ListSecrets returns the names of every Secret in namespace on
 // kubeContext.
-func (k RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace string) ([]string, error) {
+func (k *RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace string) ([]string, error) {
 	out, err := k.run(ctx, "--context", kubeContext, "-n", namespace,
 		"get", "secret", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
 	if err != nil {
@@ -88,6 +106,29 @@ func (k RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace str
 	}
 
 	return secrets, nil
+}
+
+// HelmReleaseExists reports whether namespace on kubeContext holds a
+// helm release named releaseName: any revision Secret in any status
+// counts, since helm upgrade targets failed releases too. Results are
+// memoized by release coordinates — failures included, so a broken
+// lookup doesn't re-shell-out on every render.
+func (k *RealKubectl) HelmReleaseExists(ctx context.Context, kubeContext, namespace, releaseName string) (bool, error) {
+	key := releaseKey{kubeContext: kubeContext, namespace: namespace, releaseName: releaseName}
+	if cached, ok := k.releaseCache[key]; ok {
+		return cached.exists, cached.err
+	}
+
+	out, err := k.run(ctx, "--context", kubeContext, "-n", namespace,
+		"get", "secret", "-l", "owner=helm,name="+releaseName,
+		"-o", "jsonpath={.items[*].metadata.name}")
+	result := releaseLookup{exists: err == nil && strings.TrimSpace(string(out)) != "", err: err}
+	if k.releaseCache == nil {
+		k.releaseCache = map[releaseKey]releaseLookup{}
+	}
+	k.releaseCache[key] = result
+
+	return result.exists, result.err
 }
 
 // secretManifest is the kubectl-applied Secret schema.
@@ -106,7 +147,7 @@ type secretMetadata struct {
 // EnsureSecret idempotently creates or updates a Secret holding the
 // given data. The manifest travels via stdin, so the values never
 // appear on the argv.
-func (k RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error {
+func (k *RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error {
 	if k.SimulateSlowNetwork {
 		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
 			return err
