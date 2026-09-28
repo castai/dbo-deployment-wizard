@@ -27,9 +27,7 @@ type Backend interface {
 	// DeploymentExists reports whether the committed deployment
 	// coordinates — context, namespace, release name — already hold a
 	// helm release, i.e. whether Install would upgrade it rather
-	// than create a new installation; a discovery failure reads as
-	// a new installation. The result is cached until the coordinates
-	// change.
+	// than create a new installation
 	DeploymentExists() bool
 
 	// --- commands ---
