@@ -5,7 +5,6 @@ package backend
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 
@@ -33,22 +32,8 @@ type Wizard struct {
 // Compile-time check: Wizard implements the full Backend contract.
 var _ api.Backend = (*Wizard)(nil)
 
-// NewWizard validates cfg (empty required values are domain
-// errors) and its dependencies, fills the discovery-based fields —
-// kubecontext (incoming cfg, else current-context, else the first
-// listed context) and chart version (latest from the repo; a failure
-// aborts) — and runs the discovery the UI pickers build from.
+// NewWizard implements api.Backend
 func NewWizard(ctx context.Context, cfg Config, repo *HelmRepoClient, k Kubectl, helm HelmRunner) (*Wizard, error) {
-	if cfg.APISecret == "" {
-		return nil, errors.New("api secret is required")
-	}
-	if cfg.ChartName == "" {
-		return nil, errors.New("chart name is required")
-	}
-	if cfg.ReleaseName == "" {
-		return nil, errors.New("release name is required")
-	}
-
 	w := &Wizard{
 		ctx:  ctx,
 		repo: repo,
@@ -65,7 +50,7 @@ func NewWizard(ctx context.Context, cfg Config, repo *HelmRepoClient, k Kubectl,
 		}
 	}
 
-	if w.cfg.ChartVersion == "" {
+	if w.cfg.ChartVersion == "" && w.cfg.ChartName != "" {
 		latest, err := repo.LatestVersion(ctx, cfg.ChartName)
 		if err != nil {
 			return nil, fmt.Errorf("fetch latest chart version: %w", err)

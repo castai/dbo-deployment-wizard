@@ -131,6 +131,16 @@ func (c *Config) validate() error {
 	if c.Namespace == "" {
 		errs = append(errs, "namespace is required")
 	}
+	if c.APISecret == "" {
+		return errors.New("api secret is required")
+	}
+	if c.ReleaseName == "" {
+		return errors.New("release name is required")
+	}
+	if c.ChartName == "" {
+		return errors.New("chart name is required")
+	}
+
 	if c.HasComponent(api.ComponentDBAgent) && !c.AgentCreds.Provided() {
 		errs = append(errs, "agent credentials are required")
 	}
