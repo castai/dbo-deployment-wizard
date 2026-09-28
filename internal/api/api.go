@@ -24,6 +24,13 @@ type Backend interface {
 	// Secrets returns the Secret names in the selected context and
 	// namespace; a discovery failure returns none.
 	Secrets() []string
+	// DeploymentExists reports whether the committed deployment
+	// coordinates — context, namespace, release name — already hold a
+	// helm release, i.e. whether Install would upgrade it rather
+	// than create a new installation; a discovery failure reads as
+	// a new installation. The result is cached until the coordinates
+	// change.
+	DeploymentExists() bool
 
 	// --- commands ---
 
