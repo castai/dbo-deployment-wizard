@@ -97,6 +97,15 @@ func (w *Wizard) Secrets() []string {
 	return secrets
 }
 
+// DeploymentExists reports whether the committed deployment
+// coordinates — context, namespace, release name — already hold a
+// helm release, i.e. whether Install would upgrade it rather than
+// create a new installation. The kubectl layer memoizes lookups by
+// coordinates.
+func (w *Wizard) DeploymentExists() (bool, error) {
+	return w.k.HelmReleaseExists(w.ctx, w.cfg.KubeContext, w.cfg.Namespace, w.cfg.ReleaseName)
+}
+
 // --- commands ---
 
 // SetKubeContext selects the kubectl context to install into.
