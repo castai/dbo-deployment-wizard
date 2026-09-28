@@ -14,9 +14,8 @@ fix:
 	$(LINTER) run --fix
 	$(GORELEASER) check
 
-# Regenerate mocks (configured in .mockery.yaml).
 gen:
-	mockery
+	go generate ./...
 
 # Run the tests.
 test:
