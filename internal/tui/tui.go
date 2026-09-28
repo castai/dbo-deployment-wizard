@@ -68,6 +68,11 @@ type Model struct {
 
 	reviewList list.Model
 
+	// reviewError is the backend's Continue validation message,
+	// rendered above the Continue action; cleared when the user
+	// returns from a section (the edit may have fixed it).
+	reviewError string
+
 	// Embedded huh forms, one per screen; huh forms are single-use, so
 	// primeScreen rebuilds them on every entry.
 	kubeContextForm  *huh.Form
@@ -95,9 +100,10 @@ func newModel(b api.Backend) *Model {
 	}
 
 	m.theme = huh.ThemeFunc(huh.ThemeCharm)
-	m.styles = m.theme.Theme(lipgloss.HasDarkBackground(os.Stdin, os.Stdout))
+	isDark := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+	m.styles = m.theme.Theme(isDark)
 
-	m.reviewList = list.New(nil, reviewDelegate{theme: m.styles}, 80, 14)
+	m.reviewList = list.New(nil, newReviewDelegate(m.styles, isDark), 80, 14)
 	m.reviewList.SetShowHelp(false)
 	m.reviewList.SetShowStatusBar(false)
 	m.reviewList.SetShowTitle(false)
@@ -254,7 +260,7 @@ func (m *Model) currentViewHandleKey(msg tea.KeyPressMsg) tea.Cmd {
 // availHeight/(rowHeight+spacing), so the height is 2 rows per item
 // (with slack for the delegates' sub lines) and never below 14.
 func (m *Model) refreshReviewList() {
-	items := reviewItems(m.backend)
+	items := reviewItems(m.backend, m.reviewError)
 	m.reviewList.SetItems(items)
 
 	h := 2*len(items) + 2
@@ -265,6 +271,7 @@ func (m *Model) refreshReviewList() {
 }
 
 func (m *Model) goToReview() {
+	m.reviewError = ""
 	m.refreshReviewList()
 	m.state = screenReview
 }

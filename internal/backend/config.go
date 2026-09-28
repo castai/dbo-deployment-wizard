@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -118,4 +119,30 @@ func (c *Config) SetComponentEnabled(name string, enabled bool) error {
 	sel = slices.DeleteFunc(sel, func(x string) bool { return x == name })
 
 	return c.SetComponents(sel)
+}
+
+// validate reports the unmet requirements (construction fields,
+// namespace, enabled components' credentials) as one joined error.
+func (c *Config) validate() error {
+	var errs []error
+	if c.Namespace == "" {
+		errs = append(errs, errors.New("namespace is required"))
+	}
+	if c.APISecret == "" {
+		errs = append(errs, errors.New("api secret is required"))
+	}
+	if c.ReleaseName == "" {
+		errs = append(errs, errors.New("release name is required"))
+	}
+	if c.ChartName == "" {
+		errs = append(errs, errors.New("chart name is required"))
+	}
+	if c.HasComponent(api.ComponentDBAgent) && !c.AgentCreds.Provided() {
+		errs = append(errs, errors.New("agent credentials are required"))
+	}
+	if c.HasComponent(api.ComponentPooling) && !c.PoolingCreds.Provided() {
+		errs = append(errs, errors.New("pooling credentials are required"))
+	}
+
+	return errors.Join(errs...)
 }

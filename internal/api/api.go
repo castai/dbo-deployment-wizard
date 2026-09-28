@@ -39,5 +39,10 @@ type Backend interface {
 
 	// --- actions ---
 
+	// Validate reports every unmet install prerequisite (the
+	// enabled components' credentials, the target namespace) as one
+	// error; nil means the configuration is ready to install. The
+	// review screen gates its Continue action on it.
+	Validate() error
 	Install() error
 }

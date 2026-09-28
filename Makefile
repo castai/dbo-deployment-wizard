@@ -1,14 +1,17 @@
 .PHONY: lint fix gen test tidy build
 
 GORELEASER := go run github.com/goreleaser/goreleaser/v2@v2.18.2
+# use same one as CI does
+GOLANGCI_LINT_VERSION = $(shell yq '.env.GOLANGCI_LINT_VERSION' .github/workflows/ci.yaml)
+LINTER = go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 # Lint the code.
 lint:
-	golangci-lint run
+	$(LINTER) run
 
 # Lint, auto-fix fixable issues, and validate the release config.
 fix:
-	golangci-lint run --fix
+	$(LINTER) run --fix
 	$(GORELEASER) check
 
 # Regenerate mocks (configured in .mockery.yaml).
