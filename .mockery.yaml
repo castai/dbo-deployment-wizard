@@ -1,10 +1,9 @@
 template: testify
 dir: mocks/{{trimPrefix "internal/" .InterfaceDirRelative}}
 filename: mock_{{.InterfaceName|lower}}.go
-template-data:
-  unroll-variadic: false
 packages:
   github.com/castai/dbo-deployment-wizard/internal/backend:
     interfaces:
       Kubectl: {}
+      KubectlShell: {}
       HelmRunner: {}
