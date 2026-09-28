@@ -48,6 +48,9 @@ type releaseLookup struct {
 }
 
 // run executes `kubectl <args>` and returns combined stdout/stderr.
+// A failed run wraps the exit error with kubectl's combined output —
+// it carries the failure's actual reason, which "exit status 1" alone
+// does not.
 func (k *RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
 	if k.SimulateSlowNetwork {
 		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
@@ -56,7 +59,16 @@ func (k *RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 
-	return cmd.CombinedOutput()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			return out, fmt.Errorf("%s: %w", msg, err)
+		}
+
+		return out, err
+	}
+
+	return out, nil
 }
 
 // ListKubeContexts returns every context name; an empty result is an

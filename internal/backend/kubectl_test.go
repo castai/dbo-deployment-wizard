@@ -12,8 +12,8 @@ import (
 )
 
 // stubKubectlDir puts a kubectl stub on PATH: every invocation logs
-// its arguments to the KUBECTL_LOG file, then prints KUBECTL_OUT — or
-// exits 1 when KUBECTL_FAIL is set.
+// its arguments to the KUBECTL_LOG file, then prints KUBECTL_OUT — or,
+// when KUBECTL_FAIL is set, prints KUBECTL_ERR to stderr and exits 1.
 func stubKubectlDir(t *testing.T, logPath, out string, fail bool) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -21,7 +21,7 @@ func stubKubectlDir(t *testing.T, logPath, out string, fail bool) {
 	}
 
 	dir := t.TempDir()
-	script := "#!/bin/sh\necho \"$@\" >> \"$KUBECTL_LOG\"\nif [ -n \"$KUBECTL_FAIL\" ]; then exit 1; fi\nprintf '%s\\n' \"$KUBECTL_OUT\"\n"
+	script := "#!/bin/sh\necho \"$@\" >> \"$KUBECTL_LOG\"\nif [ -n \"$KUBECTL_FAIL\" ]; then\n  echo \"$KUBECTL_ERR\" >&2\n  exit 1\nfi\nprintf '%s\\n' \"$KUBECTL_OUT\"\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "kubectl"), []byte(script), 0o755))
 
 	t.Setenv("PATH", dir)
@@ -80,12 +80,18 @@ func TestRealKubectlHelmReleaseExistsCachesFailures(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "calls.log")
 	stubKubectlDir(t, logPath, "", true)
 
+	// A failed run's error carries kubectl's stderr — the actual
+	// reason — ahead of the wrapped exit status.
+	const kubectlErr = `error: context "kind-test" does not exist`
+	t.Setenv("KUBECTL_ERR", kubectlErr)
+
 	k := &RealKubectl{}
 	ctx := context.Background()
 
 	for range 2 {
 		exists, err := k.HelmReleaseExists(ctx, "kind-test", "castai-db-optimizer", "castai-dbo")
-		require.Error(t, err)
+		require.ErrorContains(t, err, kubectlErr)
+		require.ErrorContains(t, err, "exit status 1")
 		require.False(t, exists)
 	}
 	require.Len(t, invocationLog(t, logPath), 1)
