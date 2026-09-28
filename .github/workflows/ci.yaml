@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Pinned to the version the maintainers run locally (see Makefile).
-  GOLANGCI_LINT_VERSION: v2.11.4
+  # Single source of truth — the Makefile's lint target reads this pin.
+  GOLANGCI_LINT_VERSION: v2.14.0
 
 jobs:
   test:
