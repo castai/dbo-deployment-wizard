@@ -29,7 +29,6 @@ jobs:
         uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
-          args: -v
 
       - name: Run tests
         run: make test
@@ -50,5 +49,5 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
-          args: --config=.golangci.yml
+          args: --config=.golangci.yml -v
           skip-cache: 'true'
