@@ -19,6 +19,7 @@ func newKubeContextForm(theme huh.Theme, contexts api.Backend, d *draft) *huh.Fo
 				Description("Pick a Kubernetes cluster to install the Helm chart into.").
 				OptionsFunc(func() []huh.Option[string] {
 					contexts, _ := contexts.KubeContexts()
+
 					return lo.Map(contexts, func(c string, _ int) huh.Option[string] {
 						return huh.NewOption(c, c).Selected(c == d.kubeContext)
 					})

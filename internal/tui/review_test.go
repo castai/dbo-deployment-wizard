@@ -166,7 +166,7 @@ func TestReviewItemsContinueRow(t *testing.T) {
 }
 
 func TestReviewItemsContinueRowCarriesValidationMessage(t *testing.T) {
-	const msg = "agent credentials are required; pooling credentials are required"
+	const msg = "agent credentials are required\npooling credentials are required"
 	last, ok := findRow(reviewItems(&fakeBackend{components: []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling}}, msg), "Continue")
 	if !ok {
 		t.Fatal("continue row not found")

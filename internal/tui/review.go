@@ -46,6 +46,7 @@ type reviewDelegate struct {
 // huh Charm theme's error reds so the message matches form errors.
 func newReviewDelegate(styles *huh.Styles, isDark bool) reviewDelegate {
 	lightDark := lipgloss.LightDark(isDark)
+
 	return reviewDelegate{
 		theme: styles,
 		warn:  lipgloss.NewStyle().Foreground(lightDark(lipgloss.Color("130"), lipgloss.Color("214"))),
@@ -70,7 +71,10 @@ func (d reviewDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	if ri.action {
 		// The Continue item renders as the theme's action button.
 		if ri.err != "" {
-			fmt.Fprintln(w, strings.Repeat(" ", lipgloss.Width(cursor))+d.err.Render(ri.err))
+			indent := strings.Repeat(" ", lipgloss.Width(cursor))
+			for _, line := range strings.Split(ri.err, "\n") {
+				fmt.Fprintln(w, indent+d.err.Render(line))
+			}
 		}
 		style := d.theme.Blurred.BlurredButton
 		if index == m.Index() {

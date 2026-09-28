@@ -121,35 +121,28 @@ func (c *Config) SetComponentEnabled(name string, enabled bool) error {
 	return c.SetComponents(sel)
 }
 
-// validate reports the unmet install prerequisites as one joined
-// error: the enabled components' credentials and the target
-// namespace. Kube context and chart version can't be emptied
-// through the contract (NewWizard fills them, the screens only
-// select), so they are not rechecked.
+// validate reports the unmet requirements (construction fields,
+// namespace, enabled components' credentials) as one joined error.
 func (c *Config) validate() error {
-	var errs []string
+	var errs []error
 	if c.Namespace == "" {
-		errs = append(errs, "namespace is required")
+		errs = append(errs, errors.New("namespace is required"))
 	}
 	if c.APISecret == "" {
-		return errors.New("api secret is required")
+		errs = append(errs, errors.New("api secret is required"))
 	}
 	if c.ReleaseName == "" {
-		return errors.New("release name is required")
+		errs = append(errs, errors.New("release name is required"))
 	}
 	if c.ChartName == "" {
-		return errors.New("chart name is required")
+		errs = append(errs, errors.New("chart name is required"))
 	}
-
 	if c.HasComponent(api.ComponentDBAgent) && !c.AgentCreds.Provided() {
-		errs = append(errs, "agent credentials are required")
+		errs = append(errs, errors.New("agent credentials are required"))
 	}
 	if c.HasComponent(api.ComponentPooling) && !c.PoolingCreds.Provided() {
-		errs = append(errs, "pooling credentials are required")
-	}
-	if len(errs) == 0 {
-		return nil
+		errs = append(errs, errors.New("pooling credentials are required"))
 	}
 
-	return errors.New(strings.Join(errs, "; "))
+	return errors.Join(errs...)
 }

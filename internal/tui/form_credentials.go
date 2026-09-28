@@ -20,10 +20,10 @@ import (
 // the username/password step; completeness is enforced by the review
 // screen's Continue gate instead.
 func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title string) *huh.Form {
-	const mode_secret = "secret"
-	const mode_user = "user"
+	const modeSecret = "secret"
+	const modeUser = "user"
 
-	pickedSecretMode := lo.Ternary(creds == nil || creds.SecretName != "" || creds.Username == "", mode_secret, mode_user)
+	pickedSecretMode := lo.Ternary(creds == nil || creds.SecretName != "" || creds.Username == "", modeSecret, modeUser)
 	modePtr := lo.ToPtr(pickedSecretMode)
 
 	fallbackToManualEdit := false
@@ -33,8 +33,8 @@ func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title 
 			huh.NewSelect[string]().
 				Title(title).
 				Options(
-					huh.NewOption("Existing Kubernetes Secret", mode_secret).Selected(pickedSecretMode == mode_secret),
-					huh.NewOption("Username and password", mode_user).Selected(pickedSecretMode == mode_secret),
+					huh.NewOption("Existing Kubernetes Secret", modeSecret).Selected(pickedSecretMode == modeSecret),
+					huh.NewOption("Username and password", modeUser).Selected(pickedSecretMode == modeSecret),
 				).
 				Value(modePtr),
 		),
@@ -61,11 +61,12 @@ func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title 
 				Value(&creds.SecretName),
 		).
 			WithHideFunc(func() bool {
-				if !(*modePtr == mode_secret && !fallbackToManualEdit) {
+				if *modePtr != modeSecret || fallbackToManualEdit {
 					return true
 				}
 				creds.Password = ""
 				creds.Username = ""
+
 				return false
 			}),
 
@@ -76,7 +77,7 @@ func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title 
 		).
 			Title(title).
 			WithHideFunc(func() bool {
-				return !(*modePtr == mode_secret && fallbackToManualEdit)
+				return *modePtr != modeSecret || !fallbackToManualEdit
 			}),
 
 		huh.NewGroup(
@@ -90,10 +91,11 @@ func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title 
 		).
 			Title(title).
 			WithHideFunc(func() bool {
-				if *modePtr != mode_user {
+				if *modePtr != modeUser {
 					return true
 				}
 				creds.SecretName = ""
+
 				return false
 			}),
 	).WithTheme(theme)

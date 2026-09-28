@@ -38,6 +38,7 @@ func newChartVersionForm(theme huh.Theme, b api.Backend, d *draft) *huh.Form {
 				Description("Pick a Helm chart version to use.").
 				OptionsFunc(func() []huh.Option[string] {
 					versions, _ := b.ChartVersions()
+
 					return lo.Map(versions, func(v api.HelmChartVersion, i int) huh.Option[string] {
 						return huh.NewOption(versionLabel(v, i == 0), v.Number).Selected(v.Number == d.chartVersion)
 					})

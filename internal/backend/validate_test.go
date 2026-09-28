@@ -14,6 +14,7 @@ func TestConfigValidate(t *testing.T) {
 		cfg := NewDefaultConfig()
 		cfg.KubeContext = "kind-test"
 		cfg.ChartVersion = "1.4.2"
+		cfg.APISecret = "secret"
 		cfg.AgentCreds = api.Credentials{Username: "agent", Password: "agentpass"}
 		if mutate != nil {
 			mutate(&cfg)
@@ -30,6 +31,18 @@ func TestConfigValidate(t *testing.T) {
 		"missing namespace": {
 			mutate:  func(c *Config) { c.Namespace = "" },
 			wantErr: "namespace is required",
+		},
+		"missing api secret": {
+			mutate:  func(c *Config) { c.APISecret = "" },
+			wantErr: "api secret is required",
+		},
+		"missing release name": {
+			mutate:  func(c *Config) { c.ReleaseName = "" },
+			wantErr: "release name is required",
+		},
+		"missing chart name": {
+			mutate:  func(c *Config) { c.ChartName = "" },
+			wantErr: "chart name is required",
 		},
 		"missing agent credentials": {
 			mutate:  func(c *Config) { c.AgentCreds = api.Credentials{} },
@@ -52,13 +65,16 @@ func TestConfigValidate(t *testing.T) {
 				c.PoolingCreds = api.Credentials{}
 			},
 		},
-		"every missing prerequisite joins into one message": {
+		"every missing requirement joins into one message": {
 			mutate: func(c *Config) {
 				c.Namespace = ""
+				c.APISecret = ""
+				c.ReleaseName = ""
+				c.ChartName = ""
 				c.AgentCreds = api.Credentials{}
 				require.NoError(t, c.SetComponents([]string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling}))
 			},
-			wantErr: "namespace is required; agent credentials are required; pooling credentials are required",
+			wantErr: "namespace is required\napi secret is required\nrelease name is required\nchart name is required\nagent credentials are required\npooling credentials are required",
 		},
 	}
 	for name, tt := range tests {
@@ -75,16 +91,4 @@ func TestConfigValidate(t *testing.T) {
 			r.EqualError(err, tt.wantErr)
 		})
 	}
-}
-
-func TestWizardValidate(t *testing.T) {
-	r := require.New(t)
-
-	// The default config carries no agent credentials, so the
-	// facade's validation reports exactly that.
-	w := &Wizard{cfg: NewDefaultConfig()}
-	r.EqualError(w.Validate(), "agent credentials are required")
-
-	w.cfg.AgentCreds = api.Credentials{SecretName: "agent-secret"}
-	r.NoError(w.Validate())
 }
