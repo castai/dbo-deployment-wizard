@@ -186,21 +186,14 @@ func reviewTitle(b api.Backend) string {
 	exists, err := b.DeploymentExists()
 	switch {
 	case err != nil:
-		message := truncate(firstLine(err.Error()), 48)
+		message := truncate(err.Error(), 100)
 
-		return fmt.Sprintf("Failed to determine if installing or upgrading %s: %s ", b.ReleaseName(), message)
+		return fmt.Sprintf("%s", message)
 	case exists:
 		return "Installing Helm deployment " + b.ReleaseName()
 	default:
 		return "Updating Helm deployment " + b.ReleaseName()
 	}
-}
-
-// firstLine clips multi-line strings (kubectl errors) to their first line.
-func firstLine(s string) string {
-	before, _, _ := strings.Cut(s, "\n")
-
-	return before
 }
 
 // reviewItems builds the review rows from the backend's committed

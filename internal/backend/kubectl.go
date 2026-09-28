@@ -47,28 +47,45 @@ type releaseLookup struct {
 	err    error
 }
 
-// run executes `kubectl <args>` and returns combined stdout/stderr.
-// A failed run wraps the exit error with kubectl's combined output —
-// it carries the failure's actual reason, which "exit status 1" alone
-// does not.
+// run executes `kubectl <args>`
 func (k *RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
 	if k.SimulateSlowNetwork {
 		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
 			return nil, err
 		}
 	}
+
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 
-	out, err := cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
 	if err != nil {
-		if msg := strings.TrimSpace(string(out)); msg != "" {
-			return out, fmt.Errorf("%s: %w", msg, err)
+		// Context cancellation/timeout looks different from a real kubectl error —
+		// surface it distinctly rather than "signal: killed".
+		if ctx.Err() != nil {
+			return stdout.Bytes(), fmt.Errorf("kubectl %s: %w", strings.Join(args, " "), ctx.Err())
 		}
 
-		return out, err
+		msg := strings.TrimSpace(lastLine(stderr.String()))
+		if msg == "" {
+			msg = strings.TrimSpace(lastLine(stdout.String()))
+		}
+		if msg != "" {
+			return stdout.Bytes(), errors.New(msg)
+		}
+
+		return stdout.Bytes(), err
 	}
 
-	return out, nil
+	return stdout.Bytes(), nil
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return lines[len(lines)-1]
 }
 
 // ListKubeContexts returns every context name; an empty result is an
@@ -121,26 +138,46 @@ func (k *RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace st
 }
 
 // HelmReleaseExists reports whether namespace on kubeContext holds a
-// helm release named releaseName: any revision Secret in any status
-// counts, since helm upgrade targets failed releases too. Results are
-// memoized by release coordinates — failures included, so a broken
-// lookup doesn't re-shell-out on every render.
+// helm release named releaseName: a missing namespace answers "no"
+// outright — helm would create it on install — otherwise any
+// revision Secret in any status counts, since helm upgrade targets
+// failed releases too. Results are memoized by release coordinates —
+// failures included, so a broken lookup doesn't re-shell-out on
+// every render.
 func (k *RealKubectl) HelmReleaseExists(ctx context.Context, kubeContext, namespace, releaseName string) (bool, error) {
 	key := releaseKey{kubeContext: kubeContext, namespace: namespace, releaseName: releaseName}
 	if cached, ok := k.releaseCache[key]; ok {
 		return cached.exists, cached.err
 	}
 
-	out, err := k.run(ctx, "--context", kubeContext, "-n", namespace,
-		"get", "secret", "-l", "owner=helm,name="+releaseName,
-		"-o", "jsonpath={.items[*].metadata.name}")
-	result := releaseLookup{exists: err == nil && strings.TrimSpace(string(out)) != "", err: err}
+	result := k.lookupHelmRelease(ctx, kubeContext, namespace, releaseName)
 	if k.releaseCache == nil {
 		k.releaseCache = map[releaseKey]releaseLookup{}
 	}
 	k.releaseCache[key] = result
 
 	return result.exists, result.err
+}
+
+// lookupHelmRelease is the uncached release lookup.
+func (k *RealKubectl) lookupHelmRelease(ctx context.Context, kubeContext, namespace, releaseName string) releaseLookup {
+	nsOut, err := k.run(ctx, "--context", kubeContext,
+		"get", "namespace", namespace, "--ignore-not-found", "-o", "name")
+	if err != nil {
+		return releaseLookup{err: err}
+	}
+	if strings.TrimSpace(string(nsOut)) == "" {
+		return releaseLookup{}
+	}
+
+	out, err := k.run(ctx, "--context", kubeContext, "-n", namespace,
+		"get", "secret", "-l", "owner=helm,name="+releaseName,
+		"-o", "jsonpath={.items[*].metadata.name}")
+	if err != nil {
+		return releaseLookup{err: err}
+	}
+
+	return releaseLookup{exists: strings.TrimSpace(string(out)) != ""}
 }
 
 // secretManifest is the kubectl-applied Secret schema.
