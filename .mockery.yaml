@@ -5,5 +5,5 @@ packages:
   github.com/castai/dbo-deployment-wizard/internal/backend:
     interfaces:
       Kubectl: {}
-      KubectlShell: {}
+      ProcessRunner: {}
       HelmRunner: {}

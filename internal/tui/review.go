@@ -188,9 +188,9 @@ func reviewTitle(b api.Backend) string {
 	case err != nil:
 		return truncate(err.Error(), 100)
 	case exists:
-		return "Updating Helm deployment " + b.ReleaseName()
+		return "Updating Helm deployment: " + b.ReleaseName()
 	default:
-		return "Installing Helm deployment " + b.ReleaseName()
+		return "Installing new Helm deployment: " + b.ReleaseName()
 	}
 }
 

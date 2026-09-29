@@ -11,6 +11,7 @@ lint:
 
 # Lint, auto-fix fixable issues, and validate the release config.
 fix:
+	go fmt ./...
 	$(LINTER) run --fix
 	$(GORELEASER) check
 

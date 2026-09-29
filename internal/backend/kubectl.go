@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -21,15 +22,39 @@ type Kubectl interface {
 	EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error
 }
 
+// ProcessRunner is the thin exec layer: run command,
+// get back stdout or an error.
+type ProcessRunner interface {
+	Run(ctx context.Context, program string, stdin []byte, args []string) ([]byte, error)
+}
+
+// kubectl argv fragments shared by the shell-outs.
+const (
+	kubectlContextFlag = "--context"
+	kubectlGet         = "get"
+)
+
 // RealKubectl invokes the kubectl binary on PATH. SimulateSlowNetwork
 // delays every call by simulateSlowNetworkDelay — the --slow-network
 // UI testing aid.
 type RealKubectl struct {
-	SimulateSlowNetwork bool
-
 	// releaseCache memoizes HelmReleaseExists results by release
 	// coordinates; the UI re-checks on every review render.
 	releaseCache map[releaseKey]releaseLookup
+
+	shell ProcessRunner
+}
+
+func NewRealKubectl(simulateSlowNetwork bool) *RealKubectl {
+	return &RealKubectl{
+		shell: &RealProcessRunner{
+			SimulateSlowNetwork: simulateSlowNetwork,
+		},
+	}
+}
+
+type RealProcessRunner struct {
+	SimulateSlowNetwork bool
 }
 
 // releaseKey identifies a helm release by its coordinates: the
@@ -47,15 +72,17 @@ type releaseLookup struct {
 	err    error
 }
 
-// run executes `kubectl <args>`
-func (k *RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
-	if k.SimulateSlowNetwork {
+func (s *RealProcessRunner) Run(ctx context.Context, program string, stdin []byte, args []string) ([]byte, error) {
+	if s.SimulateSlowNetwork {
 		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
 			return nil, err
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd := exec.CommandContext(ctx, program, args...)
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -85,13 +112,14 @@ func (k *RealKubectl) run(ctx context.Context, args ...string) ([]byte, error) {
 
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
+
 	return lines[len(lines)-1]
 }
 
 // ListKubeContexts returns every context name; an empty result is an
 // error.
 func (k *RealKubectl) ListKubeContexts(ctx context.Context) ([]string, error) {
-	out, err := k.run(ctx, "config", "get-contexts", "-o", "name")
+	out, err := k.runKubectl(ctx, nil, []string{"config", "get-contexts", "-o", "name"})
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +139,7 @@ func (k *RealKubectl) ListKubeContexts(ctx context.Context) ([]string, error) {
 // CurrentKubeContext returns the current context; an empty result
 // with no error is possible.
 func (k *RealKubectl) CurrentKubeContext(ctx context.Context) (string, error) {
-	out, err := k.run(ctx, "config", "current-context")
+	out, err := k.runKubectl(ctx, nil, []string{"config", "current-context"})
 	if err != nil {
 		return "", err
 	}
@@ -122,8 +150,10 @@ func (k *RealKubectl) CurrentKubeContext(ctx context.Context) (string, error) {
 // ListSecrets returns the names of every Secret in namespace on
 // kubeContext.
 func (k *RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace string) ([]string, error) {
-	out, err := k.run(ctx, "--context", kubeContext, "-n", namespace,
-		"get", "secret", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}")
+	out, err := k.runKubectl(ctx, nil, []string{
+		kubectlContextFlag, kubeContext, "-n", namespace,
+		kubectlGet, "secret", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}",
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -161,8 +191,10 @@ func (k *RealKubectl) HelmReleaseExists(ctx context.Context, kubeContext, namesp
 
 // lookupHelmRelease is the uncached release lookup.
 func (k *RealKubectl) lookupHelmRelease(ctx context.Context, kubeContext, namespace, releaseName string) releaseLookup {
-	nsOut, err := k.run(ctx, "--context", kubeContext,
-		"get", "namespace", namespace, "--ignore-not-found", "-o", "name")
+	nsOut, err := k.runKubectl(ctx, nil, []string{
+		kubectlContextFlag, kubeContext,
+		kubectlGet, "namespace", namespace, "--ignore-not-found", "-o", "name",
+	})
 	if err != nil {
 		return releaseLookup{err: err}
 	}
@@ -170,14 +202,35 @@ func (k *RealKubectl) lookupHelmRelease(ctx context.Context, kubeContext, namesp
 		return releaseLookup{}
 	}
 
-	out, err := k.run(ctx, "--context", kubeContext, "-n", namespace,
-		"get", "secret", "-l", "owner=helm,name="+releaseName,
-		"-o", "jsonpath={.items[*].metadata.name}")
+	var list struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	err = k.runKubectlJSON(ctx, []string{
+		kubectlContextFlag, kubeContext, "-n", namespace,
+		kubectlGet, "secret", "-l", "owner=helm,name=" + releaseName, "-o", "json",
+	}, &list)
 	if err != nil {
 		return releaseLookup{err: err}
 	}
 
-	return releaseLookup{exists: strings.TrimSpace(string(out)) != ""}
+	return releaseLookup{exists: len(list.Items) > 0}
+}
+
+func (k *RealKubectl) runKubectl(ctx context.Context, stdin []byte, args []string) ([]byte, error) {
+	return k.shell.Run(ctx, "kubectl", stdin, args)
+}
+
+func (k *RealKubectl) runKubectlJSON(ctx context.Context, args []string, result any) error {
+	out, err := k.runKubectl(ctx, nil, args)
+	if err != nil {
+		return err
+	}
+
+	if err := json.Unmarshal(out, result); err != nil {
+		return fmt.Errorf("parse kubectl result: %w", err)
+	}
+
+	return nil
 }
 
 // secretManifest is the kubectl-applied Secret schema.
@@ -197,11 +250,6 @@ type secretMetadata struct {
 // given data. The manifest travels via stdin, so the values never
 // appear on the argv.
 func (k *RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error {
-	if k.SimulateSlowNetwork {
-		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
-			return err
-		}
-	}
 	encoded := make(map[string]string, len(data))
 	for key, value := range data {
 		encoded[key] = base64.StdEncoding.EncodeToString([]byte(value))
@@ -218,11 +266,9 @@ func (k *RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, 
 		return fmt.Errorf("render secret manifest: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "kubectl", "--context", kubeContext, "-n", namespace, "apply", "-f", "-")
-	cmd.Stdin = bytes.NewReader(manifest)
-	out, err := cmd.CombinedOutput()
+	_, err = k.runKubectl(ctx, manifest, []string{kubectlContextFlag, kubeContext, "-n", namespace, "apply", "-f", "-"})
 	if err != nil {
-		return fmt.Errorf("kubectl apply secret %s: %w: %s", name, err, out)
+		return fmt.Errorf("kubectl apply secret %s: %w", name, err)
 	}
 
 	return nil
