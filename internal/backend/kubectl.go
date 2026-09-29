@@ -90,10 +90,10 @@ func (s *RealProcessRunner) Run(ctx context.Context, program string, stdin []byt
 
 	err := cmd.Run()
 	if err != nil {
-		// Context cancellation/timeout looks different from a real kubectl error —
+		// Context cancellation/timeout looks different from a real command error —
 		// surface it distinctly rather than "signal: killed".
 		if ctx.Err() != nil {
-			return stdout.Bytes(), fmt.Errorf("kubectl %s: %w", strings.Join(args, " "), ctx.Err())
+			return stdout.Bytes(), fmt.Errorf("%s %s: %w", program, strings.Join(args, " "), ctx.Err())
 		}
 
 		msg := strings.TrimSpace(lastLine(stderr.String()))
@@ -168,12 +168,12 @@ func (k *RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace st
 }
 
 // HelmReleaseExists reports whether namespace on kubeContext holds a
-// helm release named releaseName: a missing namespace answers "no"
-// outright — helm would create it on install — otherwise any
-// revision Secret in any status counts, since helm upgrade targets
-// failed releases too. Results are memoized by release coordinates —
-// failures included, so a broken lookup doesn't re-shell-out on
-// every render.
+// helm release named releaseName: `helm status` must answer with the
+// release's JSON and name it — a clean exit alone is not enough —
+// while its not-found line, which a missing namespace also answers
+// with, reads as a new installation. Results are memoized by release
+// coordinates — failures included, so a broken lookup doesn't
+// re-shell-out on every render.
 func (k *RealKubectl) HelmReleaseExists(ctx context.Context, kubeContext, namespace, releaseName string) (bool, error) {
 	key := releaseKey{kubeContext: kubeContext, namespace: namespace, releaseName: releaseName}
 	if cached, ok := k.releaseCache[key]; ok {
@@ -189,45 +189,56 @@ func (k *RealKubectl) HelmReleaseExists(ctx context.Context, kubeContext, namesp
 	return result.exists, result.err
 }
 
+// ErrHelmReleaseNotFound is helm's not-found answer — a missing
+// release and a missing namespace both produce it.
+var ErrHelmReleaseNotFound = errors.New("release: not found")
+
 // lookupHelmRelease is the uncached release lookup.
 func (k *RealKubectl) lookupHelmRelease(ctx context.Context, kubeContext, namespace, releaseName string) releaseLookup {
-	nsOut, err := k.runKubectl(ctx, nil, []string{
-		kubectlContextFlag, kubeContext,
-		kubectlGet, "namespace", namespace, "--ignore-not-found", "-o", "name",
-	})
-	if err != nil {
-		return releaseLookup{err: err}
+	var status struct {
+		Name string `json:"name"`
 	}
-	if strings.TrimSpace(string(nsOut)) == "" {
-		return releaseLookup{}
-	}
+	if err := k.runHelmJSON(ctx, []string{
+		"status", releaseName, "-n", namespace, "--kube-context", kubeContext, "-o", "json",
+	}, &status); err != nil {
+		if errors.Is(err, ErrHelmReleaseNotFound) {
+			return releaseLookup{}
+		}
 
-	var list struct {
-		Items []json.RawMessage `json:"items"`
-	}
-	err = k.runKubectlJSON(ctx, []string{
-		kubectlContextFlag, kubeContext, "-n", namespace,
-		kubectlGet, "secret", "-l", "owner=helm,name=" + releaseName, "-o", "json",
-	}, &list)
-	if err != nil {
 		return releaseLookup{err: err}
 	}
 
-	return releaseLookup{exists: len(list.Items) > 0}
+	if status.Name != releaseName {
+		return releaseLookup{err: fmt.Errorf("helm status answered release %q, want %q", status.Name, releaseName)}
+	}
+
+	return releaseLookup{exists: true}
 }
 
 func (k *RealKubectl) runKubectl(ctx context.Context, stdin []byte, args []string) ([]byte, error) {
 	return k.shell.Run(ctx, "kubectl", stdin, args)
 }
 
-func (k *RealKubectl) runKubectlJSON(ctx context.Context, args []string, result any) error {
-	out, err := k.runKubectl(ctx, nil, args)
+// runHelm runs helm, translating its not-found answer into
+// ErrHelmReleaseNotFound.
+func (k *RealKubectl) runHelm(ctx context.Context, stdin []byte, args []string) ([]byte, error) {
+	out, err := k.shell.Run(ctx, "helm", stdin, args)
+	if err != nil && strings.Contains(err.Error(), ErrHelmReleaseNotFound.Error()) {
+		return out, ErrHelmReleaseNotFound
+	}
+
+	return out, err
+}
+
+// runHelmJSON runs helm and unmarshals its JSON output into result.
+func (k *RealKubectl) runHelmJSON(ctx context.Context, args []string, result any) error {
+	out, err := k.runHelm(ctx, nil, args)
 	if err != nil {
 		return err
 	}
 
 	if err := json.Unmarshal(out, result); err != nil {
-		return fmt.Errorf("parse kubectl result: %w", err)
+		return fmt.Errorf("parse helm result: %w", err)
 	}
 
 	return nil
