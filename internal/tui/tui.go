@@ -153,7 +153,7 @@ func (m *Model) buildForms() {
 }
 
 func (m *Model) setCurrentScreen(s screen) {
-	m.state = screenConfirm
+	m.state = s
 	switch s {
 	case screenReview:
 		m.refreshReviewList()

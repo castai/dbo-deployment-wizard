@@ -2,8 +2,6 @@ package backend
 
 import (
 	"context"
-	"os"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -62,24 +60,12 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 	k.EXPECT().RolloutStatus(mock.Anything, "kind-test", "castai-dbo", "deployment.apps/db-agent", rolloutTimeout,
 		mock.Anything, mock.Anything).Return(nil)
 
-	var (
-		argv        []string
-		valuesFile  string
-		valuesBytes []byte
-	)
+	var valuesBytes []byte
 	sh := backendmocks.NewMockProcessRunner(t)
 	sh.EXPECT().Run(mock.Anything, "helm", mock.Anything,
 		mock.MatchedBy(func(args []string) bool { return args[0] == "upgrade" })).
-		Run(func(_ context.Context, _ string, _ []byte, callArgs []string) {
-			// Snapshot the values file while it still exists — Install
-			// deletes it right after the call.
-			// TODO: this looks ugly, redo implementation to make tests simpler
-			argv = callArgs
-			i := slices.Index(argv, "-f")
-			valuesFile = argv[i+1]
-			data, err := os.ReadFile(valuesFile)
-			r.NoError(err)
-			valuesBytes = data
+		Run(func(_ context.Context, _ string, stdin []byte, _ []string) {
+			valuesBytes = stdin
 		}).
 		Return([]byte("Release \"castai-dbo\" has been upgraded.\n"), nil)
 	sh.EXPECT().Run(mock.Anything, "helm", mock.Anything,
@@ -88,8 +74,6 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 
 	w := &Wizard{ctx: context.Background(), k: k, shell: sh, cfg: cfg}
 	r.NoError(w.Install())
-	r.Equal("upgrade", argv[0])
-	r.NotEmpty(valuesBytes, "the values file must exist while helm runs")
 
 	// Username/password pairs resolve into Secret refs, and every
 	// enabled component points at the recreated API key Secret.
@@ -111,10 +95,6 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 			},
 		},
 	}, got)
-
-	// The values file is deleted after the install.
-	_, err := os.Stat(valuesFile)
-	r.True(os.IsNotExist(err), "the values file must be deleted after the install, still present at %s", valuesFile)
 }
 
 // TestNewHelmValues_Cartesian asserts the exact values the renderer
@@ -191,8 +171,7 @@ func TestNewHelmValues_Cartesian(t *testing.T) {
 }
 
 // TestBuildHelmArgv_Deterministic locks down the exact argv shape:
-// only the release coordinates, every chart parameter in the values
-// file.
+// only the release coordinates, every chart parameter over stdin.
 func TestBuildHelmArgv_Deterministic(t *testing.T) {
 	r := require.New(t)
 
@@ -212,10 +191,10 @@ func TestBuildHelmArgv_Deterministic(t *testing.T) {
 		"--namespace", "castai-dbo",
 		"--kube-context", "kind-test",
 		"--create-namespace",
-		"-f", "/tmp/deployment-wizard-values.yaml",
+		"-f", "-",
 	}
 
-	r.Equal(want, BuildHelmArgv(cfg, "/tmp/deployment-wizard-values.yaml"))
+	r.Equal(want, BuildHelmArgv(cfg))
 }
 
 // TestHelmValuesMarshal_OmitsEmptySections pins the omitempty

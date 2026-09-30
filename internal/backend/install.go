@@ -11,10 +11,9 @@ import (
 	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
 
-// Helm install generator: renders the Config into a temporary values
-// file, builds the deterministic argv, and executes helm. Chart
-// parameters — including secrets — travel in the values file, never
-// on the argv, and the file is deleted right after it is applied.
+// Helm install generator: renders the Config into values, builds
+// the deterministic argv, and executes helm. Chart parameters —
+// including secrets — travel over stdin, never on the argv or disk.
 
 // helmValues is the values.yaml schema the castai-dbo chart consumes
 // (umbrella aliases: db-agent, db-proxy). All credentials travel as
@@ -69,34 +68,10 @@ func newHelmValues(c Config) helmValues {
 	return v
 }
 
-// writeTempValues writes data to a fresh temporary values file and
-// returns its path; the caller owns the removal. 0600 — it carries
-// secrets.
-func writeTempValues(data []byte) (string, error) {
-	f, err := os.CreateTemp("", "deployment-wizard-values-*.yaml")
-	if err != nil {
-		return "", fmt.Errorf("create temp values file: %w", err)
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-
-		return "", fmt.Errorf("write temp values file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(f.Name())
-
-		return "", fmt.Errorf("close temp values file: %w", err)
-	}
-
-	return f.Name(), nil
-}
-
 // BuildHelmArgv produces the `helm upgrade --install` argv: only the
-// release coordinates; every chart parameter travels in the values
-// file at valuesPath. Deterministic so --dry-run output matches the
-// live run.
-func BuildHelmArgv(c Config, valuesPath string) []string {
+// release coordinates; every chart parameter travels over stdin
+// (-f -). Deterministic so --dry-run output matches the live run.
+func BuildHelmArgv(c Config) []string {
 	return []string{
 		"upgrade",
 		"--install",
@@ -106,25 +81,20 @@ func BuildHelmArgv(c Config, valuesPath string) []string {
 		"--namespace", c.Namespace,
 		"--kube-context", c.KubeContext, //nolint:goconst
 		"--create-namespace",
-		"-f", valuesPath,
+		"-f", "-",
 	}
 }
 
-// Install renders cfg into a temporary values file and runs `helm
-// upgrade --install`
+// Install runs `helm upgrade --install` with the rendered values
+// piped over stdin, so they never touch the argv or disk. DryRun
+// prints the values and the exact command instead of executing.
 func Install(ctx context.Context, values helmValues, cfg Config, shell ProcessRunner) error {
 	data, err := yaml.Marshal(values)
 	if err != nil {
 		return fmt.Errorf("render helm values: %w", err)
 	}
 
-	path, err := writeTempValues(data)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(path)
-
-	argv := BuildHelmArgv(cfg, path)
+	argv := BuildHelmArgv(cfg)
 
 	if cfg.DryRun {
 		fmt.Fprintln(os.Stdout, "# Dry run: not executing. Values that would be applied:")
@@ -135,7 +105,7 @@ func Install(ctx context.Context, values helmValues, cfg Config, shell ProcessRu
 		return nil
 	}
 
-	out, err := shell.Run(ctx, "helm", nil, argv)
+	out, err := shell.Run(ctx, "helm", data, argv)
 	fmt.Fprint(os.Stdout, string(out))
 	if err != nil {
 		return fmt.Errorf("helm upgrade: %w", err)
