@@ -111,6 +111,38 @@ func (w *Wizard) DeploymentExists() (bool, error) {
 	return w.k.HelmReleaseExists(w.ctx, w.cfg.KubeContext, w.cfg.Namespace, w.cfg.ReleaseName)
 }
 
+// SummarizeInstallationImpact lists what the install will create: the
+// Helm deployment and every new Secret; the confirmation screen
+// renders the lines verbatim.
+func (w *Wizard) SummarizeInstallationImpact() []string {
+	// A failed deployment lookup stays neutral; the review title
+	// already shows why.
+	deployment := "Helm deployment:"
+	exists, err := w.DeploymentExists()
+	switch {
+	case err == nil && exists:
+		deployment = "Existing Helm deployment will be updated:"
+	case err == nil:
+		deployment = "New Helm deployment to be created:"
+	}
+
+	lines := []string{
+		deployment + " " + w.cfg.Namespace + "/" + w.cfg.ReleaseName,
+		"New api key secret will be created: " + w.cfg.ReleaseName + "-api-key",
+	}
+
+	// A username/password pair turns into a Secret at install; an
+	// existing Secret reference creates nothing.
+	if w.cfg.AgentCreds.Username != "" && w.cfg.AgentCreds.Password != "" {
+		lines = append(lines, "New db agent secret will be created: "+w.secretName("agent"))
+	}
+	if w.cfg.PoolingCreds.Username != "" && w.cfg.PoolingCreds.Password != "" {
+		lines = append(lines, "New pooling secret will be created: "+w.secretName("pooling"))
+	}
+
+	return lines
+}
+
 // --- commands ---
 
 // SetKubeContext selects the kubectl context to install into.
@@ -181,9 +213,7 @@ func (w *Wizard) Install() error {
 		values.DBProxy.APIKeySecretRef = apiSecretName
 	}
 
-	fmt.Fprintf(os.Stdout, "Installing helm chart %s:%s as '%s/%s'\n",
-		cfg.ChartName, cfg.ChartVersion, cfg.Namespace, cfg.ReleaseName)
-	if err := Install(w.ctx, values, cfg, w.shell); err != nil {
+	if err := Install(w.ctx, values, cfg, w.shell, os.Stdout); err != nil {
 		return err
 	}
 	if cfg.DryRun {
