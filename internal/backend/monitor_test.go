@@ -12,35 +12,6 @@ import (
 	backendmocks "github.com/castai/dbo-deployment-wizard/mocks/backend"
 )
 
-func TestDeploymentNames(t *testing.T) {
-	tests := map[string]struct {
-		manifest string
-		want     []string
-	}{
-		"one deployment": {
-			manifest: "---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: db-agent\n",
-			want:     []string{"deployment.apps/db-agent"},
-		},
-		"multiple deployments": {
-			manifest: "---\nkind: Deployment\nmetadata:\n  name: db-agent\n---\nkind: Deployment\nmetadata:\n  name: db-proxy\n",
-			want:     []string{"deployment.apps/db-agent", "deployment.apps/db-proxy"},
-		},
-		"other kinds": {
-			manifest: "---\nkind: Service\nmetadata:\n  name: db-agent\n",
-			want:     nil,
-		},
-		"deeper-indented names do not match": {
-			manifest: "kind: Deployment\nspec:\n    name: not-a-deployment\nmetadata:\n  name: db-agent\n",
-			want:     []string{"deployment.apps/db-agent"},
-		},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			require.Equal(t, tt.want, deploymentNames(tt.manifest))
-		})
-	}
-}
-
 func TestMonitorDeployments(t *testing.T) {
 	cfg := Config{
 		ReleaseName: "castai-dbo",
@@ -95,5 +66,13 @@ func TestMonitorDeployments(t *testing.T) {
 		var out bytes.Buffer
 		err := MonitorDeployments(context.Background(), k, shellWithManifest(t, twoDeployments), cfg, &out, &out)
 		require.EqualError(t, err, "deployment(s) not ready: deployment.apps/db-proxy")
+	})
+
+	t.Run("malformed manifest", func(t *testing.T) {
+		k := backendmocks.NewMockKubectl(t)
+
+		var out bytes.Buffer
+		err := MonitorDeployments(context.Background(), k, shellWithManifest(t, "not yaml: ["), cfg, &out, &out)
+		require.ErrorContains(t, err, "parse helm result")
 	})
 }

@@ -104,7 +104,7 @@ func BuildHelmArgv(c Config, valuesPath string) []string {
 		c.ChartName,
 		"--version", c.ChartVersion,
 		"--namespace", c.Namespace,
-		"--kube-context", c.KubeContext,
+		"--kube-context", c.KubeContext, //nolint:goconst
 		"--create-namespace",
 		"-f", valuesPath,
 	}

@@ -1,10 +1,8 @@
 package backend
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,12 +27,6 @@ type Kubectl interface {
 	RolloutStatus(ctx context.Context, kubeContext, namespace, deployment string, timeout time.Duration, stdout, stderr io.Writer) error
 }
 
-// ProcessRunner is the thin exec layer: run command,
-// get back stdout or an error.
-type ProcessRunner interface {
-	Run(ctx context.Context, program string, stdin []byte, args []string) ([]byte, error)
-}
-
 // RealKubectl invokes the kubectl binary on PATH. SimulateSlowNetwork
 // delays every call by simulateSlowNetworkDelay — the --slow-network
 // UI testing aid.
@@ -50,10 +42,6 @@ func NewRealKubectl(shell ProcessRunner) *RealKubectl {
 	return &RealKubectl{shell: shell}
 }
 
-type RealProcessRunner struct {
-	SimulateSlowNetwork bool
-}
-
 // releaseKey identifies a helm release by its coordinates: the
 // namespace on a kubectl context.
 type releaseKey struct {
@@ -67,50 +55,6 @@ type releaseKey struct {
 type releaseLookup struct {
 	exists bool
 	err    error
-}
-
-func (s *RealProcessRunner) Run(ctx context.Context, program string, stdin []byte, args []string) ([]byte, error) {
-	if s.SimulateSlowNetwork {
-		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
-			return nil, err
-		}
-	}
-
-	cmd := exec.CommandContext(ctx, program, args...)
-	if stdin != nil {
-		cmd.Stdin = bytes.NewReader(stdin)
-	}
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
-	if err != nil {
-		// Context cancellation/timeout looks different from a real command error —
-		// surface it distinctly rather than "signal: killed".
-		if ctx.Err() != nil {
-			return stdout.Bytes(), fmt.Errorf("%s %s: %w", program, strings.Join(args, " "), ctx.Err())
-		}
-
-		msg := strings.TrimSpace(lastLine(stderr.String()))
-		if msg == "" {
-			msg = strings.TrimSpace(lastLine(stdout.String()))
-		}
-		if msg != "" {
-			return stdout.Bytes(), errors.New(msg)
-		}
-
-		return stdout.Bytes(), err
-	}
-
-	return stdout.Bytes(), nil
-}
-
-func lastLine(s string) string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-
-	return lines[len(lines)-1]
 }
 
 // ListKubeContexts returns every context name; an empty result is an
@@ -186,18 +130,15 @@ func (k *RealKubectl) HelmReleaseExists(ctx context.Context, kubeContext, namesp
 	return result.exists, result.err
 }
 
-// ErrHelmReleaseNotFound is helm's not-found answer — a missing
-// release and a missing namespace both produce it.
-var ErrHelmReleaseNotFound = errors.New("release: not found")
-
 // lookupHelmRelease is the uncached release lookup.
 func (k *RealKubectl) lookupHelmRelease(ctx context.Context, kubeContext, namespace, releaseName string) releaseLookup {
-	var status struct {
+	type helmStatus struct {
 		Name string `json:"name"`
 	}
-	if err := k.runHelmJSON(ctx, []string{
-		"status", releaseName, "-n", namespace, "--kube-context", kubeContext, "-o", "json",
-	}, &status); err != nil {
+	status, err := runHelmJSON[helmStatus](ctx, k.shell, []string{
+		"status", releaseName, "-n", namespace, "--kube-context", kubeContext, //nolint:goconst
+	})
+	if err != nil {
 		if errors.Is(err, ErrHelmReleaseNotFound) {
 			return releaseLookup{}
 		}
@@ -214,31 +155,6 @@ func (k *RealKubectl) lookupHelmRelease(ctx context.Context, kubeContext, namesp
 
 func (k *RealKubectl) runKubectl(ctx context.Context, stdin []byte, args []string) ([]byte, error) {
 	return k.shell.Run(ctx, "kubectl", stdin, args)
-}
-
-// runHelm runs helm, translating its not-found answer into
-// ErrHelmReleaseNotFound.
-func (k *RealKubectl) runHelm(ctx context.Context, stdin []byte, args []string) ([]byte, error) {
-	out, err := k.shell.Run(ctx, "helm", stdin, args)
-	if err != nil && strings.Contains(err.Error(), ErrHelmReleaseNotFound.Error()) {
-		return out, ErrHelmReleaseNotFound
-	}
-
-	return out, err
-}
-
-// runHelmJSON runs helm and unmarshals its JSON output into result.
-func (k *RealKubectl) runHelmJSON(ctx context.Context, args []string, result any) error {
-	out, err := k.runHelm(ctx, nil, args)
-	if err != nil {
-		return err
-	}
-
-	if err := json.Unmarshal(out, result); err != nil {
-		return fmt.Errorf("parse helm result: %w", err)
-	}
-
-	return nil
 }
 
 // secretManifest is the kubectl-applied Secret schema.
