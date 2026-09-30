@@ -15,7 +15,7 @@ func TestRunHelmYAML(t *testing.T) {
 	}
 
 	// shellReturning stubs one helm run answering with out.
-	shellReturning := func(t *testing.T, out []byte) *backendmocks.MockProcessRunner {
+	shellReturning := func(t testing.TB, out []byte) *backendmocks.MockProcessRunner {
 		sh := backendmocks.NewMockProcessRunner(t)
 		sh.EXPECT().Run(mock.Anything, "helm", mock.Anything, []string{"get", "manifest"}).
 			Return(out, nil)

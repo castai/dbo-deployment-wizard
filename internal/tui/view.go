@@ -95,7 +95,7 @@ func (m *Model) viewReview() string {
 }
 
 func (m *Model) viewConfirm() string {
-	return m.page("Apply configuration", m.confirmList.View(), m.helpFooter(m.state))
+	return m.page("Ready to install", m.confirmList.View(), m.helpFooter(m.state))
 }
 
 func (m *Model) viewKubeContext() string {

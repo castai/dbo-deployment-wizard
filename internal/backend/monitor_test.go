@@ -19,7 +19,7 @@ func TestMonitorDeployments(t *testing.T) {
 	}
 
 	// shellWithManifest stubs the get-manifest run with the manifest.
-	shellWithManifest := func(t *testing.T, manifest string) *backendmocks.MockProcessRunner {
+	shellWithManifest := func(t testing.TB, manifest string) *backendmocks.MockProcessRunner {
 		sh := backendmocks.NewMockProcessRunner(t)
 		sh.EXPECT().Run(mock.Anything, "helm", mock.Anything, []string{
 			"get", "manifest", "--kube-context", "kind-test", "-n", "castai-db-optimizer", "castai-dbo",

@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -30,8 +31,16 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 	// The strict mock fails on any shell run — a dry run must not execute.
 	sh := backendmocks.NewMockProcessRunner(t)
 
+	var out bytes.Buffer
 	values := newHelmValues(cfg)
-	r.NoError(Install(context.Background(), values, cfg, sh))
+	r.NoError(Install(t.Context(), values, cfg, sh, &out))
+
+	rendered := out.String()
+	r.Contains(rendered, "Installing helm chart castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "# Dry run: not executing. Values that would be applied:")
+	r.Contains(rendered, "enabled: true")
+	r.Contains(rendered, "# Exact command that would run:")
+	r.Contains(rendered, "helm upgrade --install castai-dbo castai-dbo --version 1.4.2 --namespace castai-dbo --kube-context kind-test --create-namespace -f -") //nolint:dupword
 }
 
 func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
@@ -72,7 +81,7 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 		mock.MatchedBy(func(args []string) bool { return args[0] == "get" })).
 		Return([]byte("---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: db-agent\n"), nil)
 
-	w := &Wizard{ctx: context.Background(), k: k, shell: sh, cfg: cfg}
+	w := &Wizard{ctx: t.Context(), k: k, shell: sh, cfg: cfg}
 	r.NoError(w.Install())
 
 	// Username/password pairs resolve into Secret refs, and every

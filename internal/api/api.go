@@ -32,6 +32,9 @@ type Backend interface {
 	// than create a new installation; a lookup failure returns the
 	// error and false.
 	DeploymentExists() (bool, error)
+	// SummarizeInstallationImpact lists, as human-readable lines, what
+	// the install will do
+	SummarizeInstallationImpact() ([]string, error)
 
 	// --- commands ---
 

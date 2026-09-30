@@ -3,7 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
-	"os"
+	"io"
 
 	"al.essio.dev/pkg/shellescape"
 	"gopkg.in/yaml.v3"
@@ -86,27 +86,33 @@ func BuildHelmArgv(c Config) []string {
 }
 
 // Install runs `helm upgrade --install` with the rendered values
-// piped over stdin, so they never touch the argv or disk. DryRun
-// prints the values and the exact command instead of executing.
-func Install(ctx context.Context, values helmValues, cfg Config, shell ProcessRunner) error {
+// piped over stdin, so they never touch the argv or disk. stdout
+// carries the CLI transcript: the handoff blank line and banner,
+// helm's captured output, or the dry-run values and exact command.
+func Install(ctx context.Context, values helmValues, cfg Config, shell ProcessRunner, stdout io.Writer) error {
 	data, err := yaml.Marshal(values)
 	if err != nil {
 		return fmt.Errorf("render helm values: %w", err)
 	}
 
+	// A blank line hands off from the TUI's last frame.
+	fmt.Fprintln(stdout)
+	fmt.Fprintf(stdout, "Installing helm chart %s:%s as '%s/%s'\n",
+		cfg.ChartName, cfg.ChartVersion, cfg.Namespace, cfg.ReleaseName)
+
 	argv := BuildHelmArgv(cfg)
 
 	if cfg.DryRun {
-		fmt.Fprintln(os.Stdout, "# Dry run: not executing. Values that would be applied:")
-		fmt.Fprintln(os.Stdout, string(data))
-		fmt.Fprintln(os.Stdout, "# Exact command that would run:")
-		fmt.Fprintln(os.Stdout, "helm "+shellescape.QuoteCommand(argv))
+		fmt.Fprintln(stdout, "# Dry run: not executing. Values that would be applied:")
+		fmt.Fprintln(stdout, string(data))
+		fmt.Fprintln(stdout, "# Exact command that would run:")
+		fmt.Fprintln(stdout, "helm "+shellescape.QuoteCommand(argv))
 
 		return nil
 	}
 
 	out, err := shell.Run(ctx, "helm", data, argv)
-	fmt.Fprint(os.Stdout, string(out))
+	fmt.Fprint(stdout, string(out))
 	if err != nil {
 		return fmt.Errorf("helm upgrade: %w", err)
 	}

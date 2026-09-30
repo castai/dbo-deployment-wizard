@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/samber/lo"
 
 	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
@@ -235,12 +236,7 @@ func reviewItems(b api.Backend, reviewErr string) []list.Item {
 		err:    reviewErr,
 	})
 
-	out := make([]list.Item, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, r)
-	}
-
-	return out
+	return lo.Map(rows, func(r reviewItem, _ int) list.Item { return r })
 }
 
 // handleReview: Enter enters the selected section, or — on the
@@ -277,40 +273,32 @@ func (m *Model) handleReview(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
-// confirmItems builds the confirmation screen's rows: the deployment
-// overview the Apply action will execute.
+// confirmItems builds the confirmation screen's rows: the backend's
+// installation-impact summary, then the Apply button; a failed
+// lookup rides the Apply action as its error message.
 func confirmItems(b api.Backend) []list.Item {
-	exists, err := b.DeploymentExists()
-	mode := "installing"
-	switch {
-	case err != nil:
-		mode = truncate(err.Error(), 48)
-	case exists:
-		mode = "upgrading"
+	lines, err := b.SummarizeInstallationImpact()
+	apply := reviewItem{label: "Apply", action: true}
+	if err != nil {
+		apply.err = err.Error()
 	}
 
-	rows := []reviewItem{
-		{label: "Mode:", value: mode},
-		{label: "Deployment:", value: b.Namespace() + "/" + b.ReleaseName()},
-		{label: "Apply", action: true},
-	}
+	items := lo.Map(lines, func(line string, _ int) list.Item {
+		return reviewItem{label: line}
+	})
 
-	out := make([]list.Item, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, r)
-	}
-
-	return out
+	return append(items, apply)
 }
 
 // handleConfirm: Enter on the Apply action finalizes — the program
-// quits and helm runs; anything else just navigates the list.
+// quits and the install continues in plain CLI mode; anything else
+// just navigates the list.
 func (m *Model) handleConfirm(msg tea.KeyPressMsg) tea.Cmd {
 	if isConfirmAction(msg) {
 		if it, ok := m.confirmList.SelectedItem().(reviewItem); ok && it.action {
 			m.done = true
 
-			return nil
+			return tea.Quit
 		}
 
 		return nil

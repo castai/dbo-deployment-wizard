@@ -114,16 +114,15 @@ func (w *Wizard) DeploymentExists() (bool, error) {
 // SummarizeInstallationImpact lists what the install will create: the
 // Helm deployment and every new Secret; the confirmation screen
 // renders the lines verbatim.
-func (w *Wizard) SummarizeInstallationImpact() []string {
-	// A failed deployment lookup stays neutral; the review title
-	// already shows why.
-	deployment := "Helm deployment:"
+func (w *Wizard) SummarizeInstallationImpact() ([]string, error) {
 	exists, err := w.DeploymentExists()
-	switch {
-	case err == nil && exists:
+	if err != nil {
+		return nil, err
+	}
+
+	deployment := "New Helm deployment to be created:"
+	if exists {
 		deployment = "Existing Helm deployment will be updated:"
-	case err == nil:
-		deployment = "New Helm deployment to be created:"
 	}
 
 	lines := []string{
@@ -140,7 +139,7 @@ func (w *Wizard) SummarizeInstallationImpact() []string {
 		lines = append(lines, "New pooling secret will be created: "+w.secretName("pooling"))
 	}
 
-	return lines
+	return lines, nil
 }
 
 // --- commands ---
