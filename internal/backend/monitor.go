@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/samber/lo"
 )
 
 // rolloutTimeout bounds each deployment's readiness watch — the
@@ -30,13 +32,9 @@ func MonitorDeployments(ctx context.Context, k Kubectl, shell ProcessRunner, c C
 		return err
 	}
 
-	// TODO: lo.FilterMap here
-	var deployments []string
-	for _, obj := range objects {
-		if obj.Kind == "Deployment" {
-			deployments = append(deployments, "deployment.apps/"+obj.Metadata.Name)
-		}
-	}
+	deployments := lo.FilterMap(objects, func(obj manifestObject, _ int) (string, bool) {
+		return "deployment.apps/" + obj.Metadata.Name, obj.Kind == "Deployment"
+	})
 	if len(deployments) == 0 {
 		fmt.Fprintf(stdout, "No deployments found for release '%s'\n", c.ReleaseName)
 
