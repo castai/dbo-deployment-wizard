@@ -10,8 +10,6 @@ import (
 	"os"
 	"slices"
 
-	"al.essio.dev/pkg/shellescape"
-
 	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
 
@@ -201,9 +199,15 @@ func (w *Wizard) Validate() error { return w.cfg.validate() }
 func (w *Wizard) Install(stdout io.Writer) error {
 	cfg := w.cfg
 
-	existingSecrets, err := w.k.ListSecrets(w.ctx, cfg.KubeContext, cfg.Namespace)
-	if err != nil {
-		return fmt.Errorf("listing existing secrets: %w", err)
+	// The secret-write log names creating vs updating; the dry run
+	// prints the apply commands instead and skips the discovery call.
+	var existingSecrets []string
+	if !cfg.DryRun {
+		var err error
+		existingSecrets, err = w.k.ListSecrets(w.ctx, cfg.KubeContext, cfg.Namespace)
+		if err != nil {
+			return fmt.Errorf("listing existing secrets: %w", err)
+		}
 	}
 	if err := w.resolveCredentials(stdout, existingSecrets, &cfg.AgentCreds, w.secretName("agent")); err != nil {
 		return fmt.Errorf("resolving agent credentials: %w", err)
@@ -212,8 +216,11 @@ func (w *Wizard) Install(stdout io.Writer) error {
 		return fmt.Errorf("resolving pooling credentials: %w", err)
 	}
 
+	// The API key always rides its own recreated Secret — the raw value
+	// never travels in the values file.
 	apiSecretName := cfg.ReleaseName + "-api-key"
-	if err := w.createAPISecret(stdout, existingSecrets, apiSecretName); err != nil {
+	apiData := map[string]string{"API_KEY": cfg.APISecret}
+	if err := w.writeSecret(stdout, existingSecrets, apiSecretName, apiData); err != nil {
 		return fmt.Errorf("creating api secret: %w", err)
 	}
 
@@ -235,21 +242,13 @@ func (w *Wizard) Install(stdout io.Writer) error {
 	return MonitorDeployments(w.ctx, w.k, w.shell, cfg, stdout, os.Stderr)
 }
 
-// createAPISecret recreates the Secret carrying the CAST AI API key on
-// every install — there is no existing-secret path for it — so the key
-// never travels raw in the values file. DryRun skips the cluster call
-// and prints the command instead.
-// TODO: should converge to single secret create/update function
-func (w *Wizard) createAPISecret(stdout io.Writer, existing []string, secretName string) error {
-	if w.cfg.DryRun {
-		logSecretDryRun(stdout, w.cfg, secretName)
-
-		return nil
-	}
-	logSecretWrite(stdout, existing, secretName)
-	data := map[string]string{"API_KEY": w.cfg.APISecret}
-	if err := w.k.EnsureSecret(w.ctx, w.cfg.KubeContext, w.cfg.Namespace, secretName, data); err != nil {
-		return fmt.Errorf("ensure api key secret: %w", err)
+// writeSecret creates or updates the named Secret with data, logging
+// the write to the install's transcript; the kubectl layer prints
+// the apply command on dry runs.
+func (w *Wizard) writeSecret(stdout io.Writer, existing []string, name string, data map[string]string) error {
+	logSecretWrite(stdout, existing, name)
+	if err := w.k.EnsureSecret(w.ctx, w.cfg.KubeContext, w.cfg.Namespace, name, data, stdout, w.cfg.DryRun); err != nil {
+		return fmt.Errorf("ensure secret %s: %w", name, err)
 	}
 
 	return nil
@@ -257,23 +256,17 @@ func (w *Wizard) createAPISecret(stdout io.Writer, existing []string, secretName
 
 // resolveCredentials replaces a username/password pair with the ref of
 // the Secret created for it; an existing Secret ref or empty
-// credentials pass through. DryRun skips the cluster call and prints
-// the command instead.
+// credentials pass through.
 func (w *Wizard) resolveCredentials(stdout io.Writer, existing []string, c *api.Credentials, secretName string) error {
 	if c.SecretName != "" || (c.Username == "" && c.Password == "") {
 		return nil
 	}
-	if w.cfg.DryRun {
-		logSecretDryRun(stdout, w.cfg, secretName)
-	} else {
-		logSecretWrite(stdout, existing, secretName)
-		data := map[string]string{
-			"DATABASE_USERNAME": c.Username,
-			"DATABASE_PASSWORD": c.Password,
-		}
-		if err := w.k.EnsureSecret(w.ctx, w.cfg.KubeContext, w.cfg.Namespace, secretName, data); err != nil {
-			return fmt.Errorf("ensure credentials secret %s: %w", secretName, err)
-		}
+	data := map[string]string{
+		"DATABASE_USERNAME": c.Username,
+		"DATABASE_PASSWORD": c.Password,
+	}
+	if err := w.writeSecret(stdout, existing, secretName, data); err != nil {
+		return err
 	}
 	c.SecretName = secretName
 	c.Username, c.Password = "", ""
@@ -289,13 +282,6 @@ func logSecretWrite(stdout io.Writer, existing []string, name string) {
 		action = "updating"
 	}
 	fmt.Fprintln(stdout, action+" secret "+name)
-}
-
-// logSecretDryRun prints the apply command a Secret write would run —
-// the manifest rides stdin, like the helm values.
-func logSecretDryRun(stdout io.Writer, c Config, name string) {
-	fmt.Fprintf(stdout, "kubectl %s  # %s\n",
-		shellescape.QuoteCommand(ensureSecretArgv(c.KubeContext, c.Namespace)), name)
 }
 
 // secretName is the deterministic name of the wizard-created Secret

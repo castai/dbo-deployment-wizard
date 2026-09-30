@@ -62,11 +62,11 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 	k := backendmocks.NewMockKubectl(t)
 	k.EXPECT().ListSecrets(mock.Anything, "kind-test", "castai-dbo").Return(nil, nil)
 	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-agent-credentials",
-		map[string]string{"DATABASE_USERNAME": "agent", "DATABASE_PASSWORD": "agentpass"}).Return(nil)
+		map[string]string{"DATABASE_USERNAME": "agent", "DATABASE_PASSWORD": "agentpass"}, mock.Anything, mock.Anything).Return(nil)
 	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-pooling-credentials",
-		map[string]string{"DATABASE_USERNAME": "pooler", "DATABASE_PASSWORD": "poolpass"}).Return(nil)
+		map[string]string{"DATABASE_USERNAME": "pooler", "DATABASE_PASSWORD": "poolpass"}, mock.Anything, mock.Anything).Return(nil)
 	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-api-key",
-		map[string]string{"API_KEY": "sec"}).Return(nil)
+		map[string]string{"API_KEY": "sec"}, mock.Anything, mock.Anything).Return(nil)
 	k.EXPECT().RolloutStatus(mock.Anything, "kind-test", "castai-dbo", "deployment.apps/db-agent", rolloutTimeout,
 		mock.Anything, mock.Anything).Return(nil)
 
@@ -135,9 +135,10 @@ func TestWizardDryRun_PrintsSecretCommands(t *testing.T) {
 		DryRun:       true,
 	}
 
-	// No expectations: a dry run must not touch the cluster.
-	k := backendmocks.NewMockKubectl(t)
+	// A dry run must not touch the cluster: the zero-expectation shell
+	// fails on any run; RealKubectl prints the secret commands.
 	sh := backendmocks.NewMockProcessRunner(t)
+	k := &RealKubectl{shell: sh}
 
 	w := &Wizard{ctx: t.Context(), k: k, shell: sh, cfg: cfg}
 	var out bytes.Buffer

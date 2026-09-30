@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"al.essio.dev/pkg/shellescape"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,7 +19,7 @@ type Kubectl interface {
 	CurrentKubeContext(ctx context.Context) (string, error)
 	ListSecrets(ctx context.Context, kubeContext, namespace string) ([]string, error)
 	HelmReleaseExists(ctx context.Context, kubeContext, namespace, releaseName string) (bool, error)
-	EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error
+	EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string, stdout io.Writer, dryRun bool) error
 	// RolloutStatus streams `kubectl rollout status` for one
 	// deployment until it is ready or the timeout passes; the writers
 	// receive kubectl's live progress.
@@ -170,8 +171,17 @@ type secretMetadata struct {
 
 // EnsureSecret idempotently creates or updates a Secret holding the
 // given data. The manifest travels via stdin, so the values never
-// appear on the argv.
-func (k *RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error {
+// appear on the argv; a dry run prints the command instead of
+// executing it.
+func (k *RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string, stdout io.Writer, dryRun bool) error {
+	argv := []string{"--context", kubeContext, "-n", namespace, "apply", "-f", "-"} //nolint:goconst
+	if dryRun {
+		// The manifest rides stdin, like the helm values.
+		fmt.Fprintf(stdout, "kubectl %s  # %s\n", shellescape.QuoteCommand(argv), name)
+
+		return nil
+	}
+
 	encoded := make(map[string]string, len(data))
 	for key, value := range data {
 		encoded[key] = base64.StdEncoding.EncodeToString([]byte(value))
@@ -188,7 +198,7 @@ func (k *RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, 
 		return fmt.Errorf("render secret manifest: %w", err)
 	}
 
-	_, err = k.runKubectl(ctx, manifest, []string{"--context", kubeContext, "-n", namespace, "apply", "-f", "-"})
+	_, err = k.runKubectl(ctx, manifest, argv)
 	if err != nil {
 		return fmt.Errorf("kubectl apply secret %s: %w", name, err)
 	}

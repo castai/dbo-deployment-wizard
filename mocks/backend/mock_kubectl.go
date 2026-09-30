@@ -109,16 +109,16 @@ func (_c *MockKubectl_CurrentKubeContext_Call) RunAndReturn(run func(ctx context
 }
 
 // EnsureSecret provides a mock function for the type MockKubectl
-func (_mock *MockKubectl) EnsureSecret(ctx context.Context, kubeContext string, namespace string, name string, data map[string]string) error {
-	ret := _mock.Called(ctx, kubeContext, namespace, name, data)
+func (_mock *MockKubectl) EnsureSecret(ctx context.Context, kubeContext string, namespace string, name string, data map[string]string, stdout io.Writer, dryRun bool) error {
+	ret := _mock.Called(ctx, kubeContext, namespace, name, data, stdout, dryRun)
 
 	if len(ret) == 0 {
 		panic("no return value specified for EnsureSecret")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string, map[string]string) error); ok {
-		r0 = returnFunc(ctx, kubeContext, namespace, name, data)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string, map[string]string, io.Writer, bool) error); ok {
+		r0 = returnFunc(ctx, kubeContext, namespace, name, data, stdout, dryRun)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -136,11 +136,13 @@ type MockKubectl_EnsureSecret_Call struct {
 //   - namespace string
 //   - name string
 //   - data map[string]string
-func (_e *MockKubectl_Expecter) EnsureSecret(ctx any, kubeContext any, namespace any, name any, data any) *MockKubectl_EnsureSecret_Call {
-	return &MockKubectl_EnsureSecret_Call{Call: _e.mock.On("EnsureSecret", ctx, kubeContext, namespace, name, data)}
+//   - stdout io.Writer
+//   - dryRun bool
+func (_e *MockKubectl_Expecter) EnsureSecret(ctx any, kubeContext any, namespace any, name any, data any, stdout any, dryRun any) *MockKubectl_EnsureSecret_Call {
+	return &MockKubectl_EnsureSecret_Call{Call: _e.mock.On("EnsureSecret", ctx, kubeContext, namespace, name, data, stdout, dryRun)}
 }
 
-func (_c *MockKubectl_EnsureSecret_Call) Run(run func(ctx context.Context, kubeContext string, namespace string, name string, data map[string]string)) *MockKubectl_EnsureSecret_Call {
+func (_c *MockKubectl_EnsureSecret_Call) Run(run func(ctx context.Context, kubeContext string, namespace string, name string, data map[string]string, stdout io.Writer, dryRun bool)) *MockKubectl_EnsureSecret_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -162,12 +164,22 @@ func (_c *MockKubectl_EnsureSecret_Call) Run(run func(ctx context.Context, kubeC
 		if args[4] != nil {
 			arg4 = args[4].(map[string]string)
 		}
+		var arg5 io.Writer
+		if args[5] != nil {
+			arg5 = args[5].(io.Writer)
+		}
+		var arg6 bool
+		if args[6] != nil {
+			arg6 = args[6].(bool)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
 			arg4,
+			arg5,
+			arg6,
 		)
 	})
 	return _c
@@ -178,7 +190,7 @@ func (_c *MockKubectl_EnsureSecret_Call) Return(err error) *MockKubectl_EnsureSe
 	return _c
 }
 
-func (_c *MockKubectl_EnsureSecret_Call) RunAndReturn(run func(ctx context.Context, kubeContext string, namespace string, name string, data map[string]string) error) *MockKubectl_EnsureSecret_Call {
+func (_c *MockKubectl_EnsureSecret_Call) RunAndReturn(run func(ctx context.Context, kubeContext string, namespace string, name string, data map[string]string, stdout io.Writer, dryRun bool) error) *MockKubectl_EnsureSecret_Call {
 	_c.Call.Return(run)
 	return _c
 }
