@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -36,7 +35,7 @@ func TestHelmReleaseExists(t *testing.T) {
 		expectHelmCall(sh, helmStatusArgs("kind-test", "other-ns", "castai-dbo"), helmStatusJSON, nil)
 
 		k := &RealKubectl{shell: sh}
-		ctx := context.Background()
+		ctx := t.Context()
 
 		// The same coordinates hit the cache: two lookups, one helm run.
 		for range 2 {
@@ -58,7 +57,7 @@ func TestHelmReleaseExists(t *testing.T) {
 		expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"), "", ErrHelmReleaseNotFound)
 
 		k := &RealKubectl{shell: sh}
-		ctx := context.Background()
+		ctx := t.Context()
 
 		for range 2 {
 			exists, err := k.HelmReleaseExists(ctx, "kind-test", "castai-db-optimizer", "castai-dbo")
@@ -72,7 +71,7 @@ func TestHelmReleaseExists(t *testing.T) {
 		expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"), "not json", nil)
 
 		k := &RealKubectl{shell: sh}
-		exists, err := k.HelmReleaseExists(context.Background(), "kind-test", "castai-db-optimizer", "castai-dbo")
+		exists, err := k.HelmReleaseExists(t.Context(), "kind-test", "castai-db-optimizer", "castai-dbo")
 		require.ErrorContains(t, err, "parse helm result")
 		require.False(t, exists)
 	})
@@ -83,7 +82,7 @@ func TestHelmReleaseExists(t *testing.T) {
 			`{"name":"castai-dbo-2"}`, nil)
 
 		k := &RealKubectl{shell: sh}
-		exists, err := k.HelmReleaseExists(context.Background(), "kind-test", "castai-db-optimizer", "castai-dbo")
+		exists, err := k.HelmReleaseExists(t.Context(), "kind-test", "castai-db-optimizer", "castai-dbo")
 		require.ErrorContains(t, err, `answered release "castai-dbo-2"`)
 		require.False(t, exists)
 	})
@@ -95,7 +94,7 @@ func TestHelmReleaseExists(t *testing.T) {
 		expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"), "", errors.New(helmErr))
 
 		k := &RealKubectl{shell: sh}
-		ctx := context.Background()
+		ctx := t.Context()
 
 		for range 2 {
 			exists, err := k.HelmReleaseExists(ctx, "kind-test", "castai-db-optimizer", "castai-dbo")

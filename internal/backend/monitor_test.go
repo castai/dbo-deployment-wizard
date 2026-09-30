@@ -2,7 +2,6 @@ package backend
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"testing"
 
@@ -39,7 +38,7 @@ func TestMonitorDeployments(t *testing.T) {
 			"deployment.apps/db-proxy", rolloutTimeout, mock.Anything, mock.Anything).Return(nil)
 
 		var out bytes.Buffer
-		err := MonitorDeployments(context.Background(), k, shellWithManifest(t, twoDeployments), cfg, &out, &out)
+		err := MonitorDeployments(t.Context(), k, shellWithManifest(t, twoDeployments), cfg, &out, &out)
 		require.NoError(t, err)
 		require.Contains(t, out.String(), "Waiting for deployments of release 'castai-dbo' in 'castai-db-optimizer' to be ready")
 		require.Contains(t, out.String(), "Monitoring: deployment.apps/db-agent deployment.apps/db-proxy")
@@ -49,7 +48,7 @@ func TestMonitorDeployments(t *testing.T) {
 		k := backendmocks.NewMockKubectl(t)
 
 		var out bytes.Buffer
-		err := MonitorDeployments(context.Background(), k,
+		err := MonitorDeployments(t.Context(), k,
 			shellWithManifest(t, "---\nkind: ConfigMap\nmetadata:\n  name: cfg\n"), cfg, &out, &out)
 		require.NoError(t, err)
 		require.Contains(t, out.String(), "No deployments found for release 'castai-dbo'")
@@ -64,7 +63,7 @@ func TestMonitorDeployments(t *testing.T) {
 			Return(errors.New("error: timed out waiting for the condition"))
 
 		var out bytes.Buffer
-		err := MonitorDeployments(context.Background(), k, shellWithManifest(t, twoDeployments), cfg, &out, &out)
+		err := MonitorDeployments(t.Context(), k, shellWithManifest(t, twoDeployments), cfg, &out, &out)
 		require.EqualError(t, err, "deployment(s) not ready: deployment.apps/db-proxy")
 	})
 
@@ -72,7 +71,7 @@ func TestMonitorDeployments(t *testing.T) {
 		k := backendmocks.NewMockKubectl(t)
 
 		var out bytes.Buffer
-		err := MonitorDeployments(context.Background(), k, shellWithManifest(t, "not yaml: ["), cfg, &out, &out)
+		err := MonitorDeployments(t.Context(), k, shellWithManifest(t, "not yaml: ["), cfg, &out, &out)
 		require.ErrorContains(t, err, "parse helm result")
 	})
 }

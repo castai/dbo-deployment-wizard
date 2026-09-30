@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -27,7 +26,7 @@ func TestRunHelmYAML(t *testing.T) {
 	t.Run("decodes each document", func(t *testing.T) {
 		sh := shellReturning(t, []byte("---\nname: a\n---\nname: b\n"))
 
-		got, err := runHelmYAML[[]sampleResult](context.Background(), sh, []string{"get", "manifest"})
+		got, err := runHelmYAML[[]sampleResult](t.Context(), sh, []string{"get", "manifest"})
 		require.NoError(t, err)
 		require.Equal(t, []sampleResult{{Name: "a"}, {Name: "b"}}, got)
 	})
@@ -35,7 +34,7 @@ func TestRunHelmYAML(t *testing.T) {
 	t.Run("empty output decodes to none", func(t *testing.T) {
 		sh := shellReturning(t, nil)
 
-		got, err := runHelmYAML[[]sampleResult](context.Background(), sh, []string{"get", "manifest"})
+		got, err := runHelmYAML[[]sampleResult](t.Context(), sh, []string{"get", "manifest"})
 		require.NoError(t, err)
 		require.Empty(t, got)
 	})
@@ -43,7 +42,7 @@ func TestRunHelmYAML(t *testing.T) {
 	t.Run("malformed yaml errors", func(t *testing.T) {
 		sh := shellReturning(t, []byte("not yaml: ["))
 
-		_, err := runHelmYAML[[]sampleResult](context.Background(), sh, []string{"get", "manifest"})
+		_, err := runHelmYAML[[]sampleResult](t.Context(), sh, []string{"get", "manifest"})
 		require.ErrorContains(t, err, "parse helm result")
 	})
 }
