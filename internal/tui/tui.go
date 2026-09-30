@@ -67,8 +67,12 @@ type Model struct {
 	// draft is the working state of the screen being edited.
 	draft draft
 
-	reviewList  list.Model
-	confirmList list.Model
+	reviewList list.Model
+
+	// confirmLines/confirmErr are the confirmation screen's summary,
+	// fetched on screen entry so the View renders without re-querying.
+	confirmLines []string
+	confirmErr   error
 
 	// reviewError is the backend's Continue validation message,
 	// rendered above the Continue action; cleared when the user
@@ -122,8 +126,6 @@ func newModel(b api.Backend) *Model {
 	// Start on the Continue action
 	m.reviewList.Select(len(m.reviewList.Items()) - 1)
 
-	m.confirmList = newItemList(m.styles, isDark)
-
 	m.syncDraft()
 	m.buildForms()
 
@@ -176,7 +178,7 @@ func (m *Model) setCurrentScreen(s screen) {
 		m.syncDraft()
 		m.poolingCredsForm = newCredsForm(m.theme, m.backend, &m.draft.poolingCreds, "Pooling credentials")
 	case screenConfirm:
-		m.refreshConfirmList()
+		m.refreshConfirm()
 	}
 }
 
@@ -283,18 +285,10 @@ func (m *Model) refreshReviewList() {
 	m.reviewList.SetHeight(h)
 }
 
-// refreshConfirmList rebuilds the confirmation rows and starts on the
-// Apply action.
-func (m *Model) refreshConfirmList() {
-	items := confirmItems(m.backend)
-	m.confirmList.SetItems(items)
-	m.confirmList.Select(len(items) - 1)
-
-	h := 2*len(items) + 2
-	if h < 14 {
-		h = 14
-	}
-	m.confirmList.SetHeight(h)
+// refreshConfirm fetches the confirmation summary — in the View it
+// would re-query the backend on every render.
+func (m *Model) refreshConfirm() {
+	m.confirmLines, m.confirmErr = m.backend.SummarizeInstallationImpact()
 }
 
 func (m *Model) goToReview() {
@@ -373,7 +367,7 @@ func Run(b api.Backend) error {
 		return fmt.Errorf("tui: unexpected final model type %T", finalModel)
 	}
 	if fm.done {
-		return b.Install()
+		return b.Install(os.Stdout)
 	}
 
 	return ErrAborted

@@ -3,6 +3,8 @@
 // without importing the service implementation itself.
 package api
 
+import "io"
+
 // Backend is the client-facing contract frontends drive the wizard
 // through. Queries return read-only views of the committed state;
 // commands are the only write path and enforce the domain
@@ -55,5 +57,7 @@ type Backend interface {
 	// error; nil means the configuration is ready to install. The
 	// review screen gates its Continue action on it.
 	Validate() error
-	Install() error
+	// Install runs the install, writing the CLI transcript to stdout;
+	// DryRun prints the commands instead of executing.
+	Install(stdout io.Writer) error
 }

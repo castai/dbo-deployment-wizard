@@ -273,39 +273,14 @@ func (m *Model) handleReview(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
-// confirmItems builds the confirmation screen's rows: the backend's
-// installation-impact summary, then the Apply button; a failed
-// lookup rides the Apply action as its error message.
-func confirmItems(b api.Backend) []list.Item {
-	lines, err := b.SummarizeInstallationImpact()
-	apply := reviewItem{label: "Apply", action: true}
-	if err != nil {
-		apply.err = err.Error()
-	}
-
-	items := lo.Map(lines, func(line string, _ int) list.Item {
-		return reviewItem{label: line}
-	})
-
-	return append(items, apply)
-}
-
-// handleConfirm: Enter on the Apply action finalizes — the program
-// quits and the install continues in plain CLI mode; anything else
-// just navigates the list.
+// handleConfirm: Enter applies — the program quits and the install
+// continues in plain CLI mode; every other key is ignored.
 func (m *Model) handleConfirm(msg tea.KeyPressMsg) tea.Cmd {
 	if isConfirmAction(msg) {
-		if it, ok := m.confirmList.SelectedItem().(reviewItem); ok && it.action {
-			m.done = true
+		m.done = true
 
-			return tea.Quit
-		}
-
-		return nil
+		return tea.Quit
 	}
 
-	var cmd tea.Cmd
-	m.confirmList, cmd = m.confirmList.Update(msg)
-
-	return cmd
+	return nil
 }

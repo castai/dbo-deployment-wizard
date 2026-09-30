@@ -6,8 +6,11 @@ package backend
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"slices"
+
+	"al.essio.dev/pkg/shellescape"
 
 	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
@@ -111,9 +114,10 @@ func (w *Wizard) DeploymentExists() (bool, error) {
 	return w.k.HelmReleaseExists(w.ctx, w.cfg.KubeContext, w.cfg.Namespace, w.cfg.ReleaseName)
 }
 
-// SummarizeInstallationImpact lists what the install will create: the
-// Helm deployment and every new Secret; the confirmation screen
-// renders the lines verbatim.
+// SummarizeInstallationImpact lists the actions the install will
+// perform: the Helm deployment it creates or updates, and every
+// Secret it creates or updates; the confirmation screen renders the
+// lines verbatim.
 func (w *Wizard) SummarizeInstallationImpact() ([]string, error) {
 	exists, err := w.DeploymentExists()
 	if err != nil {
@@ -125,21 +129,29 @@ func (w *Wizard) SummarizeInstallationImpact() ([]string, error) {
 		deployment = "Existing Helm deployment will be updated:"
 	}
 
+	existingSecrets, _ := w.k.ListSecrets(w.ctx, w.cfg.KubeContext, w.cfg.Namespace)
 	lines := []string{
 		deployment + " " + w.cfg.Namespace + "/" + w.cfg.ReleaseName,
-		"New api key secret will be created: " + w.cfg.ReleaseName + "-api-key",
+		secretLine("api key", w.cfg.ReleaseName+"-api-key", existingSecrets),
 	}
-
-	// A username/password pair turns into a Secret at install; an
-	// existing Secret reference creates nothing.
 	if w.cfg.AgentCreds.Username != "" && w.cfg.AgentCreds.Password != "" {
-		lines = append(lines, "New db agent secret will be created: "+w.secretName("agent"))
+		lines = append(lines, secretLine("db agent", w.secretName("agent"), existingSecrets))
 	}
 	if w.cfg.PoolingCreds.Username != "" && w.cfg.PoolingCreds.Password != "" {
-		lines = append(lines, "New pooling secret will be created: "+w.secretName("pooling"))
+		lines = append(lines, secretLine("pooling", w.secretName("pooling"), existingSecrets))
 	}
 
 	return lines, nil
+}
+
+// secretLine names the credential-Secret action: updated when the
+// Secret already exists, created otherwise.
+func secretLine(component, name string, existing []string) string {
+	if slices.Contains(existing, name) {
+		return "Existing " + component + " secret will be updated: " + name
+	}
+
+	return "New " + component + " secret will be created: " + name
 }
 
 // --- commands ---
@@ -185,23 +197,24 @@ func credentialsWithPrecedence(c api.Credentials) api.Credentials {
 func (w *Wizard) Validate() error { return w.cfg.validate() }
 
 // Install runs the helm chart install and then watches the release's
-// Deployments until ready. DryRun prints the values and the exact
-// command instead of executing. Credentials given as a username/password
-// pair are turned into Secrets in the target namespace, and the API key
-// always rides its own recreated Secret — their refs, never the raw
-// values, reach helm.
-func (w *Wizard) Install() error {
+// Deployments until ready
+func (w *Wizard) Install(stdout io.Writer) error {
 	cfg := w.cfg
-	if err := w.resolveCredentials(&cfg.AgentCreds, w.secretName("agent")); err != nil {
-		return err
+
+	existingSecrets, err := w.k.ListSecrets(w.ctx, cfg.KubeContext, cfg.Namespace)
+	if err != nil {
+		return fmt.Errorf("listing existing secrets: %w", err)
 	}
-	if err := w.resolveCredentials(&cfg.PoolingCreds, w.secretName("pooling")); err != nil {
-		return err
+	if err := w.resolveCredentials(stdout, existingSecrets, &cfg.AgentCreds, w.secretName("agent")); err != nil {
+		return fmt.Errorf("resolving agent credentials: %w", err)
+	}
+	if err := w.resolveCredentials(stdout, existingSecrets, &cfg.PoolingCreds, w.secretName("pooling")); err != nil {
+		return fmt.Errorf("resolving pooling credentials: %w", err)
 	}
 
 	apiSecretName := cfg.ReleaseName + "-api-key"
-	if err := w.createAPISecret(apiSecretName); err != nil {
-		return err
+	if err := w.createAPISecret(stdout, existingSecrets, apiSecretName); err != nil {
+		return fmt.Errorf("creating api secret: %w", err)
 	}
 
 	values := newHelmValues(cfg)
@@ -212,24 +225,28 @@ func (w *Wizard) Install() error {
 		values.DBProxy.APIKeySecretRef = apiSecretName
 	}
 
-	if err := Install(w.ctx, values, cfg, w.shell, os.Stdout); err != nil {
-		return err
+	if err := Install(w.ctx, values, cfg, w.shell, stdout); err != nil {
+		return fmt.Errorf("helm install: %w", err)
 	}
 	if cfg.DryRun {
 		return nil
 	}
 
-	return MonitorDeployments(w.ctx, w.k, w.shell, cfg, os.Stdout, os.Stderr)
+	return MonitorDeployments(w.ctx, w.k, w.shell, cfg, stdout, os.Stderr)
 }
 
 // createAPISecret recreates the Secret carrying the CAST AI API key on
 // every install — there is no existing-secret path for it — so the key
-// never travels raw in the values file. DryRun skips the cluster call;
-// the values still reference the Secret by name.
-func (w *Wizard) createAPISecret(secretName string) error {
+// never travels raw in the values file. DryRun skips the cluster call
+// and prints the command instead.
+// TODO: should converge to single secret create/update function
+func (w *Wizard) createAPISecret(stdout io.Writer, existing []string, secretName string) error {
 	if w.cfg.DryRun {
+		logSecretDryRun(stdout, w.cfg, secretName)
+
 		return nil
 	}
+	logSecretWrite(stdout, existing, secretName)
 	data := map[string]string{"API_KEY": w.cfg.APISecret}
 	if err := w.k.EnsureSecret(w.ctx, w.cfg.KubeContext, w.cfg.Namespace, secretName, data); err != nil {
 		return fmt.Errorf("ensure api key secret: %w", err)
@@ -240,13 +257,16 @@ func (w *Wizard) createAPISecret(secretName string) error {
 
 // resolveCredentials replaces a username/password pair with the ref of
 // the Secret created for it; an existing Secret ref or empty
-// credentials pass through. DryRun skips the cluster call and only
-// resolves the name the Secret would get.
-func (w *Wizard) resolveCredentials(c *api.Credentials, secretName string) error {
+// credentials pass through. DryRun skips the cluster call and prints
+// the command instead.
+func (w *Wizard) resolveCredentials(stdout io.Writer, existing []string, c *api.Credentials, secretName string) error {
 	if c.SecretName != "" || (c.Username == "" && c.Password == "") {
 		return nil
 	}
-	if !w.cfg.DryRun {
+	if w.cfg.DryRun {
+		logSecretDryRun(stdout, w.cfg, secretName)
+	} else {
+		logSecretWrite(stdout, existing, secretName)
 		data := map[string]string{
 			"DATABASE_USERNAME": c.Username,
 			"DATABASE_PASSWORD": c.Password,
@@ -259,6 +279,23 @@ func (w *Wizard) resolveCredentials(c *api.Credentials, secretName string) error
 	c.Username, c.Password = "", ""
 
 	return nil
+}
+
+// logSecretWrite announces a Secret write to the install's
+// transcript; the existing-Secret check names creating vs updating.
+func logSecretWrite(stdout io.Writer, existing []string, name string) {
+	action := "creating"
+	if slices.Contains(existing, name) {
+		action = "updating"
+	}
+	fmt.Fprintln(stdout, action+" secret "+name)
+}
+
+// logSecretDryRun prints the apply command a Secret write would run —
+// the manifest rides stdin, like the helm values.
+func logSecretDryRun(stdout io.Writer, c Config, name string) {
+	fmt.Fprintf(stdout, "kubectl %s  # %s\n",
+		shellescape.QuoteCommand(ensureSecretArgv(c.KubeContext, c.Namespace)), name)
 }
 
 // secretName is the deterministic name of the wizard-created Secret

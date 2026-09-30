@@ -188,7 +188,7 @@ func (k *RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, 
 		return fmt.Errorf("render secret manifest: %w", err)
 	}
 
-	_, err = k.runKubectl(ctx, manifest, []string{"--context", kubeContext, "-n", namespace, "apply", "-f", "-"})
+	_, err = k.runKubectl(ctx, manifest, ensureSecretArgv(kubeContext, namespace))
 	if err != nil {
 		return fmt.Errorf("kubectl apply secret %s: %w", name, err)
 	}
@@ -208,6 +208,14 @@ func (k *RealKubectl) RolloutStatus(ctx context.Context, kubeContext, namespace,
 	}
 
 	return nil
+}
+
+// ensureSecretArgv is the kubectl apply argv EnsureSecret runs — the
+// manifest rides stdin. Shared with the install's dry-run log so the
+// printed command stays true to the executed one.
+// TODO: drop this function once we have noop shell command for dryrun.
+func ensureSecretArgv(kubeContext, namespace string) []string {
+	return []string{"--context", kubeContext, "-n", namespace, "apply", "-f", "-"} //nolint:goconst
 }
 
 // ErrNoKubeContexts is returned by ListKubeContexts when kubectl

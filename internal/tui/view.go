@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,16 +18,14 @@ func (m *Model) page(title, body, footer string) string {
 	)
 }
 
-// helpFooter returns the help line for the given screen; on review and
-// confirm the Enter hint names the action the cursor is on.
+// helpFooter returns the help line for the given screen; on review the
+// Enter hint names the action the cursor is on.
 func (m *Model) helpFooter(s screen) string {
 	if s == screenConfirm {
-		parts := []string{m.keyChip("↑/↓") + " pick option"}
-		if it, ok := m.confirmList.SelectedItem().(reviewItem); ok && it.action {
-			parts = append(parts, m.keyChip("Enter")+" apply")
-		}
-
-		return strings.Join(append(parts, m.keyChip("Esc")+" back"), "  ")
+		return strings.Join([]string{
+			m.keyChip("Enter") + " apply",
+			m.keyChip("Esc") + " back",
+		}, "  ")
 	}
 
 	parts := []string{m.keyChip("↑/↓") + " pick option to edit"}
@@ -95,7 +94,20 @@ func (m *Model) viewReview() string {
 }
 
 func (m *Model) viewConfirm() string {
-	return m.page("Ready to install", m.confirmList.View(), m.helpFooter(m.state))
+	var body strings.Builder
+	for _, line := range m.confirmLines {
+		fmt.Fprintln(&body, m.styles.Focused.File.Render(line))
+	}
+	if m.confirmErr != nil {
+		for _, line := range strings.Split(m.confirmErr.Error(), "\n") {
+			fmt.Fprintln(&body, m.styles.Focused.ErrorMessage.Render(line))
+		}
+	}
+
+	fmt.Fprintln(&body)
+	fmt.Fprint(&body, m.styles.Focused.FocusedButton.Render("Apply"))
+
+	return m.page("Ready to install", body.String(), m.helpFooter(m.state))
 }
 
 func (m *Model) viewKubeContext() string {

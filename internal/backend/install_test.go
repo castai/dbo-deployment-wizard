@@ -60,6 +60,7 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 	}
 
 	k := backendmocks.NewMockKubectl(t)
+	k.EXPECT().ListSecrets(mock.Anything, "kind-test", "castai-dbo").Return(nil, nil)
 	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-agent-credentials",
 		map[string]string{"DATABASE_USERNAME": "agent", "DATABASE_PASSWORD": "agentpass"}).Return(nil)
 	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-pooling-credentials",
@@ -82,7 +83,18 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 		Return([]byte("---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: db-agent\n"), nil)
 
 	w := &Wizard{ctx: t.Context(), k: k, shell: sh, cfg: cfg}
-	r.NoError(w.Install())
+	var out bytes.Buffer
+	r.NoError(w.Install(&out))
+
+	// The transcript logs every Secret write, the banner, helm's
+	// output, and the rollout watch.
+	rendered := out.String()
+	r.Contains(rendered, "creating secret castai-dbo-agent-credentials")
+	r.Contains(rendered, "creating secret castai-dbo-pooling-credentials")
+	r.Contains(rendered, "creating secret castai-dbo-api-key")
+	r.Contains(rendered, "Installing helm chart castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "Waiting for deployments of release 'castai-dbo' in 'castai-dbo' to be ready")
+	r.Contains(rendered, "Monitoring: deployment.apps/db-agent")
 
 	// Username/password pairs resolve into Secret refs, and every
 	// enabled component points at the recreated API key Secret.
@@ -104,6 +116,39 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 			},
 		},
 	}, got)
+}
+
+func TestWizardDryRun_PrintsSecretCommands(t *testing.T) {
+	r := require.New(t)
+
+	cfg := Config{
+		ReleaseName:  "castai-dbo",
+		ChartName:    "castai-dbo",
+		Namespace:    "castai-dbo",
+		KubeContext:  "kind-test",
+		ChartVersion: "1.4.2",
+		Components:   []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling},
+		AgentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
+		PoolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
+		APIURL:       "https://api.cast.ai",
+		APISecret:    "sec",
+		DryRun:       true,
+	}
+
+	// No expectations: a dry run must not touch the cluster.
+	k := backendmocks.NewMockKubectl(t)
+	sh := backendmocks.NewMockProcessRunner(t)
+
+	w := &Wizard{ctx: t.Context(), k: k, shell: sh, cfg: cfg}
+	var out bytes.Buffer
+	r.NoError(w.Install(&out))
+
+	// Each Secret write prints the apply command it would run.
+	apply := "kubectl --context kind-test -n castai-dbo apply -f -  # "
+	r.Contains(out.String(), apply+"castai-dbo-agent-credentials")
+	r.Contains(out.String(), apply+"castai-dbo-pooling-credentials")
+	r.Contains(out.String(), apply+"castai-dbo-api-key")
+	r.Contains(out.String(), "# Dry run: not executing. Values that would be applied:")
 }
 
 // TestNewHelmValues_Cartesian asserts the exact values the renderer

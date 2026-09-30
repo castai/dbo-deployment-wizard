@@ -97,21 +97,32 @@ func TestSummarizeInstallationImpact(t *testing.T) {
 	}
 
 	tests := map[string]struct {
-		exists       bool
-		lookupErr    error
-		agentCreds   api.Credentials
-		poolingCreds api.Credentials
-		want         []string
-		wantErr      string
+		exists          bool
+		lookupErr       error
+		existingSecrets []string
+		agentCreds      api.Credentials
+		poolingCreds    api.Credentials
+		want            []string
+		wantErr         string
 	}{
-		"new installation with password pairs": {
+		"new installation creates its secrets": {
 			agentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
 			poolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
 			want: []string{
 				"New Helm deployment to be created: castai-db-optimizer/castai-dbo",
-				// TODO: this is wrong? we need to check what actually exists in the cluster
 				"New api key secret will be created: castai-dbo-api-key",
 				"New db agent secret will be created: castai-dbo-agent-credentials",
+				"New pooling secret will be created: castai-dbo-pooling-credentials",
+			},
+		},
+		"existing secrets update": {
+			agentCreds:      api.Credentials{Username: "agent", Password: "agentpass"},
+			poolingCreds:    api.Credentials{Username: "pooler", Password: "poolpass"},
+			existingSecrets: []string{"castai-dbo-api-key", "castai-dbo-agent-credentials"},
+			want: []string{
+				"New Helm deployment to be created: castai-db-optimizer/castai-dbo",
+				"Existing api key secret will be updated: castai-dbo-api-key",
+				"Existing db agent secret will be updated: castai-dbo-agent-credentials",
 				"New pooling secret will be created: castai-dbo-pooling-credentials",
 			},
 		},
@@ -140,6 +151,10 @@ func TestSummarizeInstallationImpact(t *testing.T) {
 			k := backendmocks.NewMockKubectl(t)
 			k.EXPECT().HelmReleaseExists(mock.Anything, "kind-test", "castai-db-optimizer", "castai-dbo").
 				Return(tt.exists, tt.lookupErr)
+			if tt.lookupErr == nil {
+				k.EXPECT().ListSecrets(mock.Anything, "kind-test", "castai-db-optimizer").
+					Return(tt.existingSecrets, nil)
+			}
 
 			cfg := base
 			cfg.AgentCreds = tt.agentCreds
