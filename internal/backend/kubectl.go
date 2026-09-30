@@ -177,6 +177,7 @@ func (k *RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, 
 	argv := []string{"--context", kubeContext, "-n", namespace, "apply", "-f", "-"} //nolint:goconst
 	if dryRun {
 		// The manifest rides stdin, like the helm values.
+		fmt.Fprintf(stdout, "# Dry run: not executing:")
 		fmt.Fprintf(stdout, "kubectl %s  # %s\n", shellescape.QuoteCommand(argv), name)
 
 		return nil

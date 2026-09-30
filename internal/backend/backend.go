@@ -11,6 +11,7 @@ import (
 	"slices"
 
 	"github.com/castai/dbo-deployment-wizard/internal/api"
+	"github.com/samber/lo"
 )
 
 // Wizard is the domain facade owning the deployment configuration;
@@ -197,6 +198,7 @@ func (w *Wizard) Validate() error { return w.cfg.validate() }
 // Install runs the helm chart install and then watches the release's
 // Deployments until ready
 func (w *Wizard) Install(stdout io.Writer) error {
+	fmt.Fprintf(stdout, "\n\n\nApplying...%s\n", lo.Ternary(w.cfg.DryRun, "(dry run mode)", ""))
 	cfg := w.cfg
 
 	// The secret-write log names creating vs updating; the dry run
