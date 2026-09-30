@@ -6,6 +6,7 @@ package backend
 
 import (
 	"context"
+	"io"
 
 	mock "github.com/stretchr/testify/mock"
 )
@@ -122,6 +123,81 @@ func (_c *MockProcessRunner_Run_Call) Return(bytes []byte, err error) *MockProce
 }
 
 func (_c *MockProcessRunner_Run_Call) RunAndReturn(run func(ctx context.Context, program string, stdin []byte, args []string) ([]byte, error)) *MockProcessRunner_Run_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RunStream provides a mock function for the type MockProcessRunner
+func (_mock *MockProcessRunner) RunStream(ctx context.Context, program string, args []string, stdout io.Writer, stderr io.Writer) error {
+	ret := _mock.Called(ctx, program, args, stdout, stderr)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RunStream")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, io.Writer, io.Writer) error); ok {
+		r0 = returnFunc(ctx, program, args, stdout, stderr)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockProcessRunner_RunStream_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RunStream'
+type MockProcessRunner_RunStream_Call struct {
+	*mock.Call
+}
+
+// RunStream is a helper method to define mock.On call
+//   - ctx context.Context
+//   - program string
+//   - args []string
+//   - stdout io.Writer
+//   - stderr io.Writer
+func (_e *MockProcessRunner_Expecter) RunStream(ctx any, program any, args any, stdout any, stderr any) *MockProcessRunner_RunStream_Call {
+	return &MockProcessRunner_RunStream_Call{Call: _e.mock.On("RunStream", ctx, program, args, stdout, stderr)}
+}
+
+func (_c *MockProcessRunner_RunStream_Call) Run(run func(ctx context.Context, program string, args []string, stdout io.Writer, stderr io.Writer)) *MockProcessRunner_RunStream_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 []string
+		if args[2] != nil {
+			arg2 = args[2].([]string)
+		}
+		var arg3 io.Writer
+		if args[3] != nil {
+			arg3 = args[3].(io.Writer)
+		}
+		var arg4 io.Writer
+		if args[4] != nil {
+			arg4 = args[4].(io.Writer)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+		)
+	})
+	return _c
+}
+
+func (_c *MockProcessRunner_RunStream_Call) Return(err error) *MockProcessRunner_RunStream_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockProcessRunner_RunStream_Call) RunAndReturn(run func(ctx context.Context, program string, args []string, stdout io.Writer, stderr io.Writer) error) *MockProcessRunner_RunStream_Call {
 	_c.Call.Return(run)
 	return _c
 }

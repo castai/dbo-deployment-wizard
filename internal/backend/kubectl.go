@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -199,24 +197,13 @@ func (k *RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, 
 }
 
 // RolloutStatus streams kubectl's live rollout progress for one
-// deployment until it is ready or the timeout passes. It runs kubectl
-// directly instead of through the captured-output shell — the
-// install's progress must stream to the terminal.
+// deployment until it is ready or the timeout passes; the writers
+// receive kubectl's live progress.
 func (k *RealKubectl) RolloutStatus(ctx context.Context, kubeContext, namespace, deployment string, timeout time.Duration, stdout, stderr io.Writer) error {
-	// TODO: make a generic function in shell runner
-	cmd := exec.CommandContext(ctx, "kubectl", "--context", kubeContext, "-n", namespace,
-		"rollout", "status", deployment, "--timeout", timeout.String())
-	if stdout != nil {
-		cmd.Stdout = stdout
-	} else {
-		cmd.Stdout = os.Stdout
-	}
-	if stderr != nil {
-		cmd.Stderr = stderr
-	} else {
-		cmd.Stderr = os.Stderr
-	}
-	if err := cmd.Run(); err != nil {
+	if err := k.shell.RunStream(ctx, "kubectl", []string{
+		"--context", kubeContext, "-n", namespace,
+		"rollout", "status", deployment, "--timeout", timeout.String(),
+	}, stdout, stderr); err != nil {
 		return fmt.Errorf("rollout status %s: %w", deployment, err)
 	}
 

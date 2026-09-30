@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -14,10 +15,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ProcessRunner is the thin exec layer: run command,
-// get back stdout or an error.
+// ProcessRunner is the thin exec layer: run command, get back stdout
+// or an error; RunStream streams instead of capturing.
 type ProcessRunner interface {
 	Run(ctx context.Context, program string, stdin []byte, args []string) ([]byte, error)
+	// RunStream runs the program with its output streamed live to the
+	// writers instead of captured; nil writers fall back to the
+	// terminal's stdout/stderr.
+	RunStream(ctx context.Context, program string, args []string, stdout, stderr io.Writer) error
 }
 
 type RealProcessRunner struct {
@@ -60,6 +65,39 @@ func (s *RealProcessRunner) Run(ctx context.Context, program string, stdin []byt
 	}
 
 	return stdout.Bytes(), nil
+}
+
+// RunStream runs the program with its output streamed live to the
+// writers; nil writers fall back to the terminal's stdout/stderr.
+func (s *RealProcessRunner) RunStream(ctx context.Context, program string, args []string, stdout, stderr io.Writer) error {
+	if s.SimulateSlowNetwork {
+		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
+			return err
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, program, args...)
+	if stdout != nil {
+		cmd.Stdout = stdout
+	} else {
+		cmd.Stdout = os.Stdout
+	}
+	if stderr != nil {
+		cmd.Stderr = stderr
+	} else {
+		cmd.Stderr = os.Stderr
+	}
+	if err := cmd.Run(); err != nil {
+		// Context cancellation/timeout looks different from a real command error —
+		// surface it distinctly rather than "signal: killed".
+		if ctx.Err() != nil {
+			return fmt.Errorf("%s %s: %w", program, strings.Join(args, " "), ctx.Err())
+		}
+
+		return fmt.Errorf("%s: %w", program, err)
+	}
+
+	return nil
 }
 
 func lastLine(s string) string {
