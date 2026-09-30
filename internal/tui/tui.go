@@ -33,6 +33,7 @@ const (
 	screenAgentCreds
 	screenComponents
 	screenPoolingCreds
+	screenConfirm
 )
 
 // draft is the per-entry working state the forms bind to: initialized
@@ -66,15 +67,14 @@ type Model struct {
 	// draft is the working state of the screen being edited.
 	draft draft
 
-	reviewList list.Model
+	reviewList  list.Model
+	confirmList list.Model
 
 	// reviewError is the backend's Continue validation message,
 	// rendered above the Continue action; cleared when the user
 	// returns from a section (the edit may have fixed it).
 	reviewError string
 
-	// Embedded huh forms, one per screen; huh forms are single-use, so
-	// primeScreen rebuilds them on every entry.
 	kubeContextForm  *huh.Form
 	chartVersionForm *huh.Form
 	namespaceForm    *huh.Form
@@ -93,6 +93,19 @@ func isConfirmAction(msg tea.KeyPressMsg) bool {
 	return k.Code == tea.KeyEnter && k.Mod == 0
 }
 
+// newItemList builds an item list with the wizard's shared chrome:
+// no title, status bar, or help, and no quit bindings.
+func newItemList(styles *huh.Styles, isDark bool) list.Model {
+	l := list.New(nil, newReviewDelegate(styles, isDark), 80, 14)
+	l.SetShowHelp(false)
+	l.SetShowStatusBar(false)
+	l.SetShowTitle(false)
+	l.DisableQuitKeybindings()
+	l.InfiniteScrolling = true
+
+	return l
+}
+
 func newModel(b api.Backend) *Model {
 	m := &Model{
 		state:   screenReview,
@@ -103,16 +116,13 @@ func newModel(b api.Backend) *Model {
 	isDark := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
 	m.styles = m.theme.Theme(isDark)
 
-	m.reviewList = list.New(nil, newReviewDelegate(m.styles, isDark), 80, 14)
-	m.reviewList.SetShowHelp(false)
-	m.reviewList.SetShowStatusBar(false)
-	m.reviewList.SetShowTitle(false)
-	m.reviewList.DisableQuitKeybindings()
-	m.reviewList.InfiniteScrolling = true
+	m.reviewList = newItemList(m.styles, isDark)
 	m.refreshReviewList()
 
 	// Start on the Continue action
 	m.reviewList.Select(len(m.reviewList.Items()) - 1)
+
+	m.confirmList = newItemList(m.styles, isDark)
 
 	m.syncDraft()
 	m.buildForms()
@@ -142,9 +152,8 @@ func (m *Model) buildForms() {
 	m.poolingCredsForm = newCredsForm(m.theme, m.backend, &m.draft.poolingCreds, "Pooling credentials")
 }
 
-// primeScreen re-syncs the draft and rebuilds the screen's form (huh
-// forms are single-use).
-func (m *Model) primeScreen(s screen) {
+func (m *Model) setCurrentScreen(s screen) {
+	m.state = screenConfirm
 	switch s {
 	case screenReview:
 		m.refreshReviewList()
@@ -166,6 +175,8 @@ func (m *Model) primeScreen(s screen) {
 	case screenPoolingCreds:
 		m.syncDraft()
 		m.poolingCredsForm = newCredsForm(m.theme, m.backend, &m.draft.poolingCreds, "Pooling credentials")
+	case screenConfirm:
+		m.refreshConfirmList()
 	}
 }
 
@@ -250,6 +261,8 @@ func (m *Model) currentViewHandleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleComponents(msg)
 	case screenPoolingCreds:
 		return m.handlePoolingCreds(msg)
+	case screenConfirm:
+		return m.handleConfirm(msg)
 	}
 
 	return nil
@@ -268,6 +281,20 @@ func (m *Model) refreshReviewList() {
 		h = 14
 	}
 	m.reviewList.SetHeight(h)
+}
+
+// refreshConfirmList rebuilds the confirmation rows and starts on the
+// Apply action.
+func (m *Model) refreshConfirmList() {
+	items := confirmItems(m.backend)
+	m.confirmList.SetItems(items)
+	m.confirmList.Select(len(items) - 1)
+
+	h := 2*len(items) + 2
+	if h < 14 {
+		h = 14
+	}
+	m.confirmList.SetHeight(h)
 }
 
 func (m *Model) goToReview() {

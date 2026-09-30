@@ -6,6 +6,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/castai/dbo-deployment-wizard/internal/api"
@@ -21,8 +22,8 @@ type Wizard struct {
 	ctx  context.Context
 	repo *HelmRepoClient
 	k    Kubectl
-	// helm executes the helm install; tests inject a mock.
-	helm HelmRunner
+	// shell executes the helm install; tests inject a mock.
+	shell ProcessRunner
 
 	cfg Config
 
@@ -37,13 +38,13 @@ func (w *Wizard) ReleaseName() string {
 var _ api.Backend = (*Wizard)(nil)
 
 // NewWizard implements api.Backend
-func NewWizard(ctx context.Context, cfg Config, repo *HelmRepoClient, k Kubectl, helm HelmRunner) (*Wizard, error) {
+func NewWizard(ctx context.Context, cfg Config, repo *HelmRepoClient, k Kubectl, shell ProcessRunner) (*Wizard, error) {
 	w := &Wizard{
-		ctx:  ctx,
-		repo: repo,
-		k:    k,
-		helm: helm,
-		cfg:  cfg,
+		ctx:   ctx,
+		repo:  repo,
+		k:     k,
+		shell: shell,
+		cfg:   cfg,
 	}
 
 	if w.cfg.KubeContext == "" {
@@ -152,11 +153,12 @@ func credentialsWithPrecedence(c api.Credentials) api.Credentials {
 // screen gates its Continue action on it.
 func (w *Wizard) Validate() error { return w.cfg.validate() }
 
-// Install runs the helm chart install; DryRun prints the values
-// and the exact command instead of executing. Credentials given as a
-// username/password pair are turned into Secrets in the target
-// namespace, and the API key always rides its own recreated Secret —
-// their refs, never the raw values, reach helm.
+// Install runs the helm chart install and then watches the release's
+// Deployments until ready. DryRun prints the values and the exact
+// command instead of executing. Credentials given as a username/password
+// pair are turned into Secrets in the target namespace, and the API key
+// always rides its own recreated Secret — their refs, never the raw
+// values, reach helm.
 func (w *Wizard) Install() error {
 	cfg := w.cfg
 	if err := w.resolveCredentials(&cfg.AgentCreds, w.secretName("agent")); err != nil {
@@ -179,7 +181,16 @@ func (w *Wizard) Install() error {
 		values.DBProxy.APIKeySecretRef = apiSecretName
 	}
 
-	return Install(w.ctx, values, cfg, w.helm)
+	fmt.Fprintf(os.Stdout, "Installing helm chart %s:%s as '%s/%s'\n",
+		cfg.ChartName, cfg.ChartVersion, cfg.Namespace, cfg.ReleaseName)
+	if err := Install(w.ctx, values, cfg, w.shell); err != nil {
+		return err
+	}
+	if cfg.DryRun {
+		return nil
+	}
+
+	return MonitorDeployments(w.ctx, w.k, w.shell, cfg, os.Stdout, os.Stderr)
 }
 
 // createAPISecret recreates the Secret carrying the CAST AI API key on

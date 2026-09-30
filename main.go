@@ -108,10 +108,10 @@ func run(ctx context.Context, cfg backend.Config) error {
 	}
 
 	repo := backend.NewHelmRepoClient(&http.Client{}, cfg.ChartRepo, cfg.SimulateSlowNetwork)
-	k := backend.NewRealKubectl(cfg.SimulateSlowNetwork)
-	helm := backend.DefaultHelmRunner{}
+	shell := &backend.RealProcessRunner{SimulateSlowNetwork: cfg.SimulateSlowNetwork}
+	k := backend.NewRealKubectl(shell)
 
-	w, err := backend.NewWizard(ctx, cfg, repo, k, &helm)
+	w, err := backend.NewWizard(ctx, cfg, repo, k, shell)
 	if err != nil {
 		return err
 	}

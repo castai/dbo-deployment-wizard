@@ -17,14 +17,23 @@ func (m *Model) page(title, body, footer string) string {
 	)
 }
 
-// helpFooter returns the help line for the given screen; on review the
-// Enter hint names the action the cursor is on.
+// helpFooter returns the help line for the given screen; on review and
+// confirm the Enter hint names the action the cursor is on.
 func (m *Model) helpFooter(s screen) string {
+	if s == screenConfirm {
+		parts := []string{m.keyChip("↑/↓") + " pick option"}
+		if it, ok := m.confirmList.SelectedItem().(reviewItem); ok && it.action {
+			parts = append(parts, m.keyChip("Enter")+" apply")
+		}
+
+		return strings.Join(append(parts, m.keyChip("Esc")+" back"), "  ")
+	}
+
 	parts := []string{m.keyChip("↑/↓") + " pick option to edit"}
 	if s == screenReview {
 		enterHint := "edit"
 		if it, ok := m.reviewList.SelectedItem().(reviewItem); ok && it.action {
-			enterHint = "proceed to installation"
+			enterHint = "proceed to confirmation"
 		}
 		parts = append(parts,
 			m.keyChip("Enter")+" "+enterHint,
@@ -60,6 +69,8 @@ func (m *Model) View() tea.View {
 		body = m.viewComponents()
 	case screenPoolingCreds:
 		body = m.viewPoolingCreds()
+	case screenConfirm:
+		body = m.viewConfirm()
 	default:
 		body = "(unknown screen)"
 	}
@@ -81,6 +92,10 @@ func wrapView(body string) tea.View {
 
 func (m *Model) viewReview() string {
 	return m.page(reviewTitle(m.backend), m.reviewList.View(), m.helpFooter(m.state))
+}
+
+func (m *Model) viewConfirm() string {
+	return m.page("Apply configuration", m.confirmList.View(), m.helpFooter(m.state))
 }
 
 func (m *Model) viewKubeContext() string {

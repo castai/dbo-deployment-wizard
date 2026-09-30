@@ -6,6 +6,8 @@ package backend
 
 import (
 	"context"
+	"io"
+	"time"
 
 	mock "github.com/stretchr/testify/mock"
 )
@@ -391,6 +393,93 @@ func (_c *MockKubectl_ListSecrets_Call) Return(strings []string, err error) *Moc
 }
 
 func (_c *MockKubectl_ListSecrets_Call) RunAndReturn(run func(ctx context.Context, kubeContext string, namespace string) ([]string, error)) *MockKubectl_ListSecrets_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RolloutStatus provides a mock function for the type MockKubectl
+func (_mock *MockKubectl) RolloutStatus(ctx context.Context, kubeContext string, namespace string, deployment string, timeout time.Duration, stdout io.Writer, stderr io.Writer) error {
+	ret := _mock.Called(ctx, kubeContext, namespace, deployment, timeout, stdout, stderr)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RolloutStatus")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string, time.Duration, io.Writer, io.Writer) error); ok {
+		r0 = returnFunc(ctx, kubeContext, namespace, deployment, timeout, stdout, stderr)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockKubectl_RolloutStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RolloutStatus'
+type MockKubectl_RolloutStatus_Call struct {
+	*mock.Call
+}
+
+// RolloutStatus is a helper method to define mock.On call
+//   - ctx context.Context
+//   - kubeContext string
+//   - namespace string
+//   - deployment string
+//   - timeout time.Duration
+//   - stdout io.Writer
+//   - stderr io.Writer
+func (_e *MockKubectl_Expecter) RolloutStatus(ctx any, kubeContext any, namespace any, deployment any, timeout any, stdout any, stderr any) *MockKubectl_RolloutStatus_Call {
+	return &MockKubectl_RolloutStatus_Call{Call: _e.mock.On("RolloutStatus", ctx, kubeContext, namespace, deployment, timeout, stdout, stderr)}
+}
+
+func (_c *MockKubectl_RolloutStatus_Call) Run(run func(ctx context.Context, kubeContext string, namespace string, deployment string, timeout time.Duration, stdout io.Writer, stderr io.Writer)) *MockKubectl_RolloutStatus_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		var arg4 time.Duration
+		if args[4] != nil {
+			arg4 = args[4].(time.Duration)
+		}
+		var arg5 io.Writer
+		if args[5] != nil {
+			arg5 = args[5].(io.Writer)
+		}
+		var arg6 io.Writer
+		if args[6] != nil {
+			arg6 = args[6].(io.Writer)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+			arg5,
+			arg6,
+		)
+	})
+	return _c
+}
+
+func (_c *MockKubectl_RolloutStatus_Call) Return(err error) *MockKubectl_RolloutStatus_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockKubectl_RolloutStatus_Call) RunAndReturn(run func(ctx context.Context, kubeContext string, namespace string, deployment string, timeout time.Duration, stdout io.Writer, stderr io.Writer) error) *MockKubectl_RolloutStatus_Call {
 	_c.Call.Return(run)
 	return _c
 }

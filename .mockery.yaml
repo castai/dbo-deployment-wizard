@@ -6,4 +6,3 @@ packages:
     interfaces:
       Kubectl: {}
       ProcessRunner: {}
-      HelmRunner: {}

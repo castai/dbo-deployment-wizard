@@ -2,13 +2,10 @@ package backend
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
-	"strings"
 
+	"al.essio.dev/pkg/shellescape"
 	"gopkg.in/yaml.v3"
 
 	"github.com/castai/dbo-deployment-wizard/internal/api"
@@ -109,79 +106,13 @@ func BuildHelmArgv(c Config, valuesPath string) []string {
 		"--namespace", c.Namespace,
 		"--kube-context", c.KubeContext,
 		"--create-namespace",
-		"--wait",
 		"-f", valuesPath,
 	}
 }
 
-// ArgvToCommand renders an argv slice as a shell-safe command line
-// (for --dry-run transcripts).
-func ArgvToCommand(argv []string) string {
-	parts := make([]string, len(argv))
-	for i, a := range argv {
-		if a == "" || strings.ContainsAny(a, " \t\"'$`\\") {
-			parts[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
-		} else {
-			parts[i] = a
-		}
-	}
-
-	return strings.Join(parts, " ")
-}
-
-// HelmRunner abstracts `helm upgrade --install` so tests can verify
-// the argv without spawning a real binary.
-type HelmRunner interface {
-	Run(ctx context.Context, argv []string, stdout, stderr io.Writer) error
-	// Argv prefixes the executable name, for --dry-run printing.
-	Argv(argv []string) []string
-}
-
-// DefaultHelmRunner executes `helm upgrade --install` via os/exec.
-type DefaultHelmRunner struct{}
-
-// Argv prepends "helm" to the argv.
-func (*DefaultHelmRunner) Argv(argv []string) []string {
-	out := make([]string, 0, len(argv)+1)
-	out = append(out, "helm")
-
-	return append(out, argv...)
-}
-
-// Run executes `helm` with the given argv, forwarding stdout/stderr
-// when non-nil.
-func (*DefaultHelmRunner) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) error {
-	helmPath, err := exec.LookPath("helm")
-	if err != nil {
-		return fmt.Errorf("helm binary not found on PATH: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, helmPath, argv...)
-	if stdout != nil {
-		cmd.Stdout = stdout
-	} else {
-		cmd.Stdout = os.Stdout
-	}
-	if stderr != nil {
-		cmd.Stderr = stderr
-	} else {
-		cmd.Stderr = os.Stderr
-	}
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("helm exited with error: %w", err)
-	}
-
-	return nil
-}
-
-// ErrHelmNotInstalled is returned when the helm binary cannot be
-// located on PATH.
-var ErrHelmNotInstalled = errors.New("helm binary not found on PATH")
-
 // Install renders cfg into a temporary values file and runs `helm
-// upgrade --install` with it, deleting the file afterwards. DryRun
-// prints the values and the exact command instead of executing.
-// runner is injectable for tests; nil uses the os/exec default.
-func Install(ctx context.Context, values helmValues, cfg Config, runner HelmRunner) error {
+// upgrade --install`
+func Install(ctx context.Context, values helmValues, cfg Config, shell ProcessRunner) error {
 	data, err := yaml.Marshal(values)
 	if err != nil {
 		return fmt.Errorf("render helm values: %w", err)
@@ -199,10 +130,16 @@ func Install(ctx context.Context, values helmValues, cfg Config, runner HelmRunn
 		fmt.Fprintln(os.Stdout, "# Dry run: not executing. Values that would be applied:")
 		fmt.Fprintln(os.Stdout, string(data))
 		fmt.Fprintln(os.Stdout, "# Exact command that would run:")
-		fmt.Fprintln(os.Stdout, ArgvToCommand(runner.Argv(argv)))
+		fmt.Fprintln(os.Stdout, "helm "+shellescape.QuoteCommand(argv))
 
 		return nil
 	}
 
-	return runner.Run(ctx, argv, os.Stdout, os.Stderr)
+	out, err := shell.Run(ctx, "helm", nil, argv)
+	fmt.Fprint(os.Stdout, string(out))
+	if err != nil {
+		return fmt.Errorf("helm upgrade: %w", err)
+	}
+
+	return nil
 }

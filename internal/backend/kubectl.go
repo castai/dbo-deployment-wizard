@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,6 +23,10 @@ type Kubectl interface {
 	ListSecrets(ctx context.Context, kubeContext, namespace string) ([]string, error)
 	HelmReleaseExists(ctx context.Context, kubeContext, namespace, releaseName string) (bool, error)
 	EnsureSecret(ctx context.Context, kubeContext, namespace, name string, data map[string]string) error
+	// RolloutStatus streams `kubectl rollout status` for one
+	// deployment until it is ready or the timeout passes; the writers
+	// receive kubectl's live progress.
+	RolloutStatus(ctx context.Context, kubeContext, namespace, deployment string, timeout time.Duration, stdout, stderr io.Writer) error
 }
 
 // ProcessRunner is the thin exec layer: run command,
@@ -27,12 +34,6 @@ type Kubectl interface {
 type ProcessRunner interface {
 	Run(ctx context.Context, program string, stdin []byte, args []string) ([]byte, error)
 }
-
-// kubectl argv fragments shared by the shell-outs.
-const (
-	kubectlContextFlag = "--context"
-	kubectlGet         = "get"
-)
 
 // RealKubectl invokes the kubectl binary on PATH. SimulateSlowNetwork
 // delays every call by simulateSlowNetworkDelay — the --slow-network
@@ -45,12 +46,8 @@ type RealKubectl struct {
 	shell ProcessRunner
 }
 
-func NewRealKubectl(simulateSlowNetwork bool) *RealKubectl {
-	return &RealKubectl{
-		shell: &RealProcessRunner{
-			SimulateSlowNetwork: simulateSlowNetwork,
-		},
-	}
+func NewRealKubectl(shell ProcessRunner) *RealKubectl {
+	return &RealKubectl{shell: shell}
 }
 
 type RealProcessRunner struct {
@@ -151,8 +148,8 @@ func (k *RealKubectl) CurrentKubeContext(ctx context.Context) (string, error) {
 // kubeContext.
 func (k *RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace string) ([]string, error) {
 	out, err := k.runKubectl(ctx, nil, []string{
-		kubectlContextFlag, kubeContext, "-n", namespace,
-		kubectlGet, "secret", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}",
+		"--context", kubeContext, "-n", namespace, //nolint:goconst
+		"get", "secret", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}",
 	})
 	if err != nil {
 		return nil, err
@@ -277,9 +274,34 @@ func (k *RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, 
 		return fmt.Errorf("render secret manifest: %w", err)
 	}
 
-	_, err = k.runKubectl(ctx, manifest, []string{kubectlContextFlag, kubeContext, "-n", namespace, "apply", "-f", "-"})
+	_, err = k.runKubectl(ctx, manifest, []string{"--context", kubeContext, "-n", namespace, "apply", "-f", "-"})
 	if err != nil {
 		return fmt.Errorf("kubectl apply secret %s: %w", name, err)
+	}
+
+	return nil
+}
+
+// RolloutStatus streams kubectl's live rollout progress for one
+// deployment until it is ready or the timeout passes. It runs kubectl
+// directly instead of through the captured-output shell — the
+// install's progress must stream to the terminal.
+func (k *RealKubectl) RolloutStatus(ctx context.Context, kubeContext, namespace, deployment string, timeout time.Duration, stdout, stderr io.Writer) error {
+	// TODO: make a generic function in shell runner
+	cmd := exec.CommandContext(ctx, "kubectl", "--context", kubeContext, "-n", namespace,
+		"rollout", "status", deployment, "--timeout", timeout.String())
+	if stdout != nil {
+		cmd.Stdout = stdout
+	} else {
+		cmd.Stdout = os.Stdout
+	}
+	if stderr != nil {
+		cmd.Stderr = stderr
+	} else {
+		cmd.Stderr = os.Stderr
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("rollout status %s: %w", deployment, err)
 	}
 
 	return nil

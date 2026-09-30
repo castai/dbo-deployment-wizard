@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"io"
 	"os"
 	"slices"
 	"testing"
@@ -30,13 +29,11 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 		DryRun:       true,
 	}
 
-	// Argv feeds the printed command; an unexpected Run call fails the
-	// strict mock.
-	helm := backendmocks.NewMockHelmRunner(t)
-	helm.EXPECT().Argv(mock.Anything).Return([]string{"helm", "upgrade", "--install"})
+	// The strict mock fails on any shell run — a dry run must not execute.
+	sh := backendmocks.NewMockProcessRunner(t)
 
 	values := newHelmValues(cfg)
-	r.NoError(Install(context.Background(), values, cfg, helm))
+	r.NoError(Install(context.Background(), values, cfg, sh))
 }
 
 func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
@@ -62,27 +59,34 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 		map[string]string{"DATABASE_USERNAME": "pooler", "DATABASE_PASSWORD": "poolpass"}).Return(nil)
 	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-api-key",
 		map[string]string{"API_KEY": "sec"}).Return(nil)
+	k.EXPECT().RolloutStatus(mock.Anything, "kind-test", "castai-dbo", "deployment.apps/db-agent", rolloutTimeout,
+		mock.Anything, mock.Anything).Return(nil)
 
 	var (
 		argv        []string
 		valuesFile  string
 		valuesBytes []byte
 	)
-	helm := backendmocks.NewMockHelmRunner(t)
-	helm.EXPECT().Run(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Run(func(_ context.Context, callArgv []string, _, _ io.Writer) {
+	sh := backendmocks.NewMockProcessRunner(t)
+	sh.EXPECT().Run(mock.Anything, "helm", mock.Anything,
+		mock.MatchedBy(func(args []string) bool { return args[0] == "upgrade" })).
+		Run(func(_ context.Context, _ string, _ []byte, callArgs []string) {
 			// Snapshot the values file while it still exists — Install
 			// deletes it right after the call.
-			argv = callArgv
+			// TODO: this looks ugly, redo implementation to make tests simpler
+			argv = callArgs
 			i := slices.Index(argv, "-f")
 			valuesFile = argv[i+1]
 			data, err := os.ReadFile(valuesFile)
 			r.NoError(err)
 			valuesBytes = data
 		}).
-		Return(nil)
+		Return([]byte("Release \"castai-dbo\" has been upgraded.\n"), nil)
+	sh.EXPECT().Run(mock.Anything, "helm", mock.Anything,
+		mock.MatchedBy(func(args []string) bool { return args[0] == "get" })).
+		Return([]byte("---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: db-agent\n"), nil)
 
-	w := &Wizard{ctx: context.Background(), k: k, helm: helm, cfg: cfg}
+	w := &Wizard{ctx: context.Background(), k: k, shell: sh, cfg: cfg}
 	r.NoError(w.Install())
 	r.Equal("upgrade", argv[0])
 	r.NotEmpty(valuesBytes, "the values file must exist while helm runs")
@@ -208,17 +212,10 @@ func TestBuildHelmArgv_Deterministic(t *testing.T) {
 		"--namespace", "castai-dbo",
 		"--kube-context", "kind-test",
 		"--create-namespace",
-		"--wait",
 		"-f", "/tmp/deployment-wizard-values.yaml",
 	}
 
 	r.Equal(want, BuildHelmArgv(cfg, "/tmp/deployment-wizard-values.yaml"))
-}
-
-func TestArgvToCommand(t *testing.T) {
-	r := require.New(t)
-
-	r.Equal("echo 'hello world' 'a$b'", ArgvToCommand([]string{"echo", "hello world", "a$b"}))
 }
 
 // TestHelmValuesMarshal_OmitsEmptySections pins the omitempty

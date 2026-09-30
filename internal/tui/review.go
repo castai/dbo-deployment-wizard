@@ -244,9 +244,9 @@ func reviewItems(b api.Backend, reviewErr string) []list.Item {
 }
 
 // handleReview: Enter enters the selected section, or — on the
-// Continue item — finalizes the install after the backend validates
-// every prerequisite; a failure renders the message above the
-// button instead of proceeding.
+// Continue item — proceeds to the confirmation screen after the
+// backend validates every prerequisite; a failure renders the
+// message above the button instead.
 func (m *Model) handleReview(msg tea.KeyPressMsg) tea.Cmd {
 	if isConfirmAction(msg) {
 		if it, ok := m.reviewList.SelectedItem().(reviewItem); ok {
@@ -257,12 +257,11 @@ func (m *Model) handleReview(msg tea.KeyPressMsg) tea.Cmd {
 
 					return nil
 				}
-				m.done = true
+				m.setCurrentScreen(screenConfirm)
 
 				return nil
 			}
-			m.state = it.target
-			m.primeScreen(it.target)
+			m.setCurrentScreen(it.target)
 			if f := m.activeForm(); f != nil {
 				// Init focuses the form's first field.
 				return (*f).Init()
@@ -274,6 +273,51 @@ func (m *Model) handleReview(msg tea.KeyPressMsg) tea.Cmd {
 
 	var cmd tea.Cmd
 	m.reviewList, cmd = m.reviewList.Update(msg)
+
+	return cmd
+}
+
+// confirmItems builds the confirmation screen's rows: the deployment
+// overview the Apply action will execute.
+func confirmItems(b api.Backend) []list.Item {
+	exists, err := b.DeploymentExists()
+	mode := "installing"
+	switch {
+	case err != nil:
+		mode = truncate(err.Error(), 48)
+	case exists:
+		mode = "upgrading"
+	}
+
+	rows := []reviewItem{
+		{label: "Mode:", value: mode},
+		{label: "Deployment:", value: b.Namespace() + "/" + b.ReleaseName()},
+		{label: "Apply", action: true},
+	}
+
+	out := make([]list.Item, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r)
+	}
+
+	return out
+}
+
+// handleConfirm: Enter on the Apply action finalizes — the program
+// quits and helm runs; anything else just navigates the list.
+func (m *Model) handleConfirm(msg tea.KeyPressMsg) tea.Cmd {
+	if isConfirmAction(msg) {
+		if it, ok := m.confirmList.SelectedItem().(reviewItem); ok && it.action {
+			m.done = true
+
+			return nil
+		}
+
+		return nil
+	}
+
+	var cmd tea.Cmd
+	m.confirmList, cmd = m.confirmList.Update(msg)
 
 	return cmd
 }
