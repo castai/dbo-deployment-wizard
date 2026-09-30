@@ -11,6 +11,10 @@ import (
 )
 
 func TestRunHelmYAML(t *testing.T) {
+	type sampleResult struct {
+		Name string `yaml:"name"`
+	}
+
 	// shellReturning stubs one helm run answering with out.
 	shellReturning := func(t *testing.T, out []byte) *backendmocks.MockProcessRunner {
 		sh := backendmocks.NewMockProcessRunner(t)
@@ -21,29 +25,25 @@ func TestRunHelmYAML(t *testing.T) {
 	}
 
 	t.Run("decodes each document", func(t *testing.T) {
-		sh := shellReturning(t, []byte(
-			"---\nkind: Deployment\nmetadata:\n  name: db-agent\n---\nkind: Service\nmetadata:\n  name: db-agent\n"))
+		sh := shellReturning(t, []byte("---\nname: a\n---\nname: b\n"))
 
-		objects, err := runHelmYAML[[]manifestObject](context.Background(), sh, []string{"get", "manifest"})
+		got, err := runHelmYAML[[]sampleResult](context.Background(), sh, []string{"get", "manifest"})
 		require.NoError(t, err)
-		require.Len(t, objects, 2)
-		require.Equal(t, "Deployment", objects[0].Kind)
-		require.Equal(t, "db-agent", objects[0].Metadata.Name)
-		require.Equal(t, "Service", objects[1].Kind)
+		require.Equal(t, []sampleResult{{Name: "a"}, {Name: "b"}}, got)
 	})
 
 	t.Run("empty output decodes to none", func(t *testing.T) {
 		sh := shellReturning(t, nil)
 
-		objects, err := runHelmYAML[[]manifestObject](context.Background(), sh, []string{"get", "manifest"})
+		got, err := runHelmYAML[[]sampleResult](context.Background(), sh, []string{"get", "manifest"})
 		require.NoError(t, err)
-		require.Empty(t, objects)
+		require.Empty(t, got)
 	})
 
 	t.Run("malformed yaml errors", func(t *testing.T) {
 		sh := shellReturning(t, []byte("not yaml: ["))
 
-		_, err := runHelmYAML[[]manifestObject](context.Background(), sh, []string{"get", "manifest"})
+		_, err := runHelmYAML[[]sampleResult](context.Background(), sh, []string{"get", "manifest"})
 		require.ErrorContains(t, err, "parse helm result")
 	})
 }
