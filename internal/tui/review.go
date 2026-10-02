@@ -239,48 +239,123 @@ func reviewItems(b api.Backend, reviewErr string) []list.Item {
 	return lo.Map(rows, func(r reviewItem, _ int) list.Item { return r })
 }
 
-// handleReview: Enter enters the selected section, or — on the
-// Continue item — proceeds to the confirmation screen after the
-// backend validates every prerequisite; a failure renders the
-// message above the button instead.
-func (m *Model) handleReview(msg tea.KeyPressMsg) tea.Cmd {
+// handleReview and handleConfirm moved to the root model (tui.go);
+// the screen state lives in reviewModel below.
+
+// newItemList builds an item list with the wizard's shared chrome:
+// no title, status bar, or help, and no quit bindings.
+func newItemList(styles *huh.Styles, isDark bool) list.Model {
+	l := list.New(nil, newReviewDelegate(styles, isDark), 80, 14)
+	l.SetShowHelp(false)
+	l.SetShowStatusBar(false)
+	l.SetShowTitle(false)
+	l.DisableQuitKeybindings()
+	l.InfiniteScrolling = true
+
+	return l
+}
+
+// reviewModel is the review screen's sub-model: the configuration hub
+// list with the Continue action. It owns the list, the validation
+// message riding Continue, and the screen's rendering; the root model
+// routes keys in and carries out the navigation it asks for.
+type reviewModel struct {
+	backend api.Backend
+	styles  *huh.Styles
+	list    list.Model
+
+	// reviewError is the backend's Continue validation message,
+	// rendered above the Continue action; cleared when the user
+	// returns from a section (the edit may have fixed it).
+	reviewError string
+}
+
+func newReviewModel(b api.Backend, styles *huh.Styles, isDark bool) *reviewModel {
+	r := &reviewModel{
+		backend: b,
+		styles:  styles,
+		list:    newItemList(styles, isDark),
+	}
+	r.sync()
+
+	// Start on the Continue action
+	r.list.Select(len(r.list.Items()) - 1)
+
+	return r
+}
+
+// sync rebuilds the review rows and sizes the list so every row lands
+// on one page: the list pages at availHeight/(rowHeight+spacing), so
+// the height is 2 rows per item (with slack for the delegates' sub
+// lines) and never below 14.
+func (r *reviewModel) sync() {
+	items := reviewItems(r.backend, r.reviewError)
+	r.list.SetItems(items)
+
+	h := 2*len(items) + 2
+	if h < 14 {
+		h = 14
+	}
+	r.list.SetHeight(h)
+}
+
+// backToReview resets the rows for re-entry from a sub-screen; the
+// validation message clears — the edit may have fixed it.
+func (r *reviewModel) backToReview() {
+	r.reviewError = ""
+	r.sync()
+}
+
+// update routes the review screen's keys; the second return names the
+// screen to navigate to, screenReview to stay.
+func (r *reviewModel) update(msg tea.KeyPressMsg) (tea.Cmd, screen) {
 	if isConfirmAction(msg) {
-		if it, ok := m.reviewList.SelectedItem().(reviewItem); ok {
+		if it, ok := r.list.SelectedItem().(reviewItem); ok {
 			if it.action {
-				if err := m.backend.Validate(); err != nil {
-					m.reviewError = err.Error()
-					m.refreshReviewList()
+				if err := r.backend.Validate(); err != nil {
+					r.reviewError = err.Error()
+					r.sync()
 
-					return nil
+					return nil, screenReview
 				}
-				m.setCurrentScreen(screenConfirm)
 
-				return nil
+				return nil, screenConfirm
 			}
-			m.setCurrentScreen(it.target)
-			if f := m.activeForm(); f != nil {
-				// Init focuses the form's first field.
-				return (*f).Init()
-			}
+
+			return nil, it.target
 		}
 
-		return nil
+		return nil, screenReview
 	}
 
 	var cmd tea.Cmd
-	m.reviewList, cmd = m.reviewList.Update(msg)
+	r.list, cmd = r.list.Update(msg)
 
-	return cmd
+	return cmd, screenReview
 }
 
-// handleConfirm: Enter applies — the program quits and the install
-// continues in plain CLI mode; every other key is ignored.
-func (m *Model) handleConfirm(msg tea.KeyPressMsg) tea.Cmd {
-	if isConfirmAction(msg) {
-		m.done = true
+// view renders the whole screen: title, rows, help footer.
+func (r *reviewModel) view() string {
+	return lipgloss.JoinVertical(lipgloss.Left,
+		r.styles.Group.Title.Render(reviewTitle(r.backend)),
+		r.list.View(),
+		r.styles.Help.ShortDesc.Render(r.footer()),
+	)
+}
 
-		return tea.Quit
+// footer builds the review help line; the Enter hint names the action
+// the cursor is on.
+func (r *reviewModel) footer() string {
+	enterHint := "edit"
+	if it, ok := r.list.SelectedItem().(reviewItem); ok && it.action {
+		enterHint = "proceed to confirmation"
 	}
 
-	return nil
+	parts := []string{
+		keyChip(r.styles, "↑/↓") + " pick option to edit",
+		keyChip(r.styles, "Enter") + " " + enterHint,
+		keyChip(r.styles, "Esc") + " quit",
+	}
+
+	return strings.Join(parts, "  ")
 }

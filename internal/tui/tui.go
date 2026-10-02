@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 
-	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
@@ -48,10 +47,10 @@ type draft struct {
 	poolingCreds api.Credentials
 }
 
-// Model is the bubbletea model. Sub-models (the review list, the
-// embedded huh forms) own their own cursor, scroll, and focus state;
-// per-screen handlers only intercept keys the sub-model can't handle
-// (Enter to commit, Esc to go back, Ctrl+C to abort).
+// Model is the bubbletea model: the screen router. The review and
+// confirm screens and the embedded huh forms are sub-models owning
+// their own state and rendering; the root routes keys to the active
+// one and carries out the navigation they ask for.
 type Model struct {
 	state screen
 
@@ -67,17 +66,8 @@ type Model struct {
 	// draft is the working state of the screen being edited.
 	draft draft
 
-	reviewList list.Model
-
-	// confirmLines/confirmErr are the confirmation screen's summary,
-	// fetched on screen entry so the View renders without re-querying.
-	confirmLines []string
-	confirmErr   error
-
-	// reviewError is the backend's Continue validation message,
-	// rendered above the Continue action; cleared when the user
-	// returns from a section (the edit may have fixed it).
-	reviewError string
+	review  *reviewModel
+	confirm *confirmModel
 
 	kubeContextForm  *huh.Form
 	chartVersionForm *huh.Form
@@ -97,19 +87,6 @@ func isConfirmAction(msg tea.KeyPressMsg) bool {
 	return k.Code == tea.KeyEnter && k.Mod == 0
 }
 
-// newItemList builds an item list with the wizard's shared chrome:
-// no title, status bar, or help, and no quit bindings.
-func newItemList(styles *huh.Styles, isDark bool) list.Model {
-	l := list.New(nil, newReviewDelegate(styles, isDark), 80, 14)
-	l.SetShowHelp(false)
-	l.SetShowStatusBar(false)
-	l.SetShowTitle(false)
-	l.DisableQuitKeybindings()
-	l.InfiniteScrolling = true
-
-	return l
-}
-
 func newModel(b api.Backend) *Model {
 	m := &Model{
 		state:   screenReview,
@@ -120,11 +97,8 @@ func newModel(b api.Backend) *Model {
 	isDark := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
 	m.styles = m.theme.Theme(isDark)
 
-	m.reviewList = newItemList(m.styles, isDark)
-	m.refreshReviewList()
-
-	// Start on the Continue action
-	m.reviewList.Select(len(m.reviewList.Items()) - 1)
+	m.review = newReviewModel(b, m.styles, isDark)
+	m.confirm = newConfirmModel(b, m.styles)
 
 	m.syncDraft()
 	m.buildForms()
@@ -157,8 +131,6 @@ func (m *Model) buildForms() {
 func (m *Model) setCurrentScreen(s screen) {
 	m.state = s
 	switch s {
-	case screenReview:
-		m.refreshReviewList()
 	case screenKubeContext:
 		m.syncDraft()
 		m.kubeContextForm = newKubeContextForm(m.theme, m.backend, &m.draft)
@@ -177,8 +149,6 @@ func (m *Model) setCurrentScreen(s screen) {
 	case screenPoolingCreds:
 		m.syncDraft()
 		m.poolingCredsForm = newCredsForm(m.theme, m.backend, &m.draft.poolingCreds, "Pooling credentials")
-	case screenConfirm:
-		m.refreshConfirm()
 	}
 }
 
@@ -196,6 +166,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = tea.Batch(tea.ClearScreen, repaintIn())
 	case tea.KeyPressMsg:
 		_, cmd = m.handleKey(typed)
+	case confirmSummaryMsg:
+		m.confirm.update(typed)
 	case tea.BackgroundColorMsg:
 		_, _ = forwardToForm(&m.kubeContextForm, typed)
 		_, _ = forwardToForm(&m.poolingCredsForm, typed)
@@ -270,30 +242,44 @@ func (m *Model) currentViewHandleKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// refreshReviewList rebuilds the review rows and sizes the list so
-// every row lands on one page: the list pages at
-// availHeight/(rowHeight+spacing), so the height is 2 rows per item
-// (with slack for the delegates' sub lines) and never below 14.
-func (m *Model) refreshReviewList() {
-	items := reviewItems(m.backend, m.reviewError)
-	m.reviewList.SetItems(items)
-
-	h := 2*len(items) + 2
-	if h < 14 {
-		h = 14
+// handleReview routes the review sub-model's keys and carries out the
+// navigation it asks for: entering the selected section, or — from
+// Continue — moving on to confirmation.
+func (m *Model) handleReview(msg tea.KeyPressMsg) tea.Cmd {
+	cmd, next := m.review.update(msg)
+	if next == screenReview {
+		return cmd
 	}
-	m.reviewList.SetHeight(h)
+
+	m.setCurrentScreen(next)
+	if next == screenConfirm {
+		return m.confirm.enter()
+	}
+	if f := m.activeForm(); f != nil {
+		// Init focuses the form's first field.
+		return tea.Batch(cmd, (*f).Init())
+	}
+
+	return cmd
 }
 
-// refreshConfirm fetches the confirmation summary — in the View it
-// would re-query the backend on every render.
-func (m *Model) refreshConfirm() {
-	m.confirmLines, m.confirmErr = m.backend.SummarizeInstallationImpact()
+// handleConfirm: Enter applies once the confirm sub-model's summary
+// has loaded — the program quits and the install continues in plain
+// CLI mode. Enter while loading does nothing, so a double-click
+// through from review can never apply a summary the user has not
+// seen.
+func (m *Model) handleConfirm(msg tea.KeyPressMsg) tea.Cmd {
+	if isConfirmAction(msg) && !m.confirm.loading {
+		m.done = true
+
+		return tea.Quit
+	}
+
+	return nil
 }
 
 func (m *Model) goToReview() {
-	m.reviewError = ""
-	m.refreshReviewList()
+	m.review.backToReview()
 	m.state = screenReview
 }
 
