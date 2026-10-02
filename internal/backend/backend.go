@@ -10,8 +10,9 @@ import (
 	"os"
 	"slices"
 
-	"github.com/castai/dbo-deployment-wizard/internal/api"
 	"github.com/samber/lo"
+
+	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
 
 // Wizard is the domain facade owning the deployment configuration;
