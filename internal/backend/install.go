@@ -2,22 +2,18 @@ package backend
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
-	"strings"
 
+	"al.essio.dev/pkg/shellescape"
 	"gopkg.in/yaml.v3"
 
 	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
 
-// Helm install generator: renders the Config into a temporary values
-// file, builds the deterministic argv, and executes helm. Chart
-// parameters — including secrets — travel in the values file, never
-// on the argv, and the file is deleted right after it is applied.
+// Helm install generator: renders the Config into values, builds
+// the deterministic argv, and executes helm. Chart parameters —
+// including secrets — travel over stdin, never on the argv or disk.
 
 // helmValues is the values.yaml schema the castai-dbo chart consumes
 // (umbrella aliases: db-agent, db-proxy). All credentials travel as
@@ -72,34 +68,10 @@ func newHelmValues(c Config) helmValues {
 	return v
 }
 
-// writeTempValues writes data to a fresh temporary values file and
-// returns its path; the caller owns the removal. 0600 — it carries
-// secrets.
-func writeTempValues(data []byte) (string, error) {
-	f, err := os.CreateTemp("", "deployment-wizard-values-*.yaml")
-	if err != nil {
-		return "", fmt.Errorf("create temp values file: %w", err)
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-
-		return "", fmt.Errorf("write temp values file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(f.Name())
-
-		return "", fmt.Errorf("close temp values file: %w", err)
-	}
-
-	return f.Name(), nil
-}
-
 // BuildHelmArgv produces the `helm upgrade --install` argv: only the
-// release coordinates; every chart parameter travels in the values
-// file at valuesPath. Deterministic so --dry-run output matches the
-// live run.
-func BuildHelmArgv(c Config, valuesPath string) []string {
+// release coordinates; every chart parameter travels over stdin
+// (-f -). Deterministic so --dry-run output matches the live run.
+func BuildHelmArgv(c Config) []string {
 	return []string{
 		"upgrade",
 		"--install",
@@ -107,102 +79,43 @@ func BuildHelmArgv(c Config, valuesPath string) []string {
 		c.ChartName,
 		"--version", c.ChartVersion,
 		"--namespace", c.Namespace,
-		"--kube-context", c.KubeContext,
+		"--kube-context", c.KubeContext, //nolint:goconst
 		"--create-namespace",
-		"--wait",
-		"-f", valuesPath,
+		"-f", "-",
 	}
 }
 
-// ArgvToCommand renders an argv slice as a shell-safe command line
-// (for --dry-run transcripts).
-func ArgvToCommand(argv []string) string {
-	parts := make([]string, len(argv))
-	for i, a := range argv {
-		if a == "" || strings.ContainsAny(a, " \t\"'$`\\") {
-			parts[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
-		} else {
-			parts[i] = a
-		}
-	}
-
-	return strings.Join(parts, " ")
-}
-
-// HelmRunner abstracts `helm upgrade --install` so tests can verify
-// the argv without spawning a real binary.
-type HelmRunner interface {
-	Run(ctx context.Context, argv []string, stdout, stderr io.Writer) error
-	// Argv prefixes the executable name, for --dry-run printing.
-	Argv(argv []string) []string
-}
-
-// DefaultHelmRunner executes `helm upgrade --install` via os/exec.
-type DefaultHelmRunner struct{}
-
-// Argv prepends "helm" to the argv.
-func (DefaultHelmRunner) Argv(argv []string) []string {
-	out := make([]string, 0, len(argv)+1)
-	out = append(out, "helm")
-
-	return append(out, argv...)
-}
-
-// Run executes `helm` with the given argv, forwarding stdout/stderr
-// when non-nil.
-func (DefaultHelmRunner) Run(ctx context.Context, argv []string, stdout, stderr io.Writer) error {
-	helmPath, err := exec.LookPath("helm")
-	if err != nil {
-		return fmt.Errorf("helm binary not found on PATH: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, helmPath, argv...)
-	if stdout != nil {
-		cmd.Stdout = stdout
-	} else {
-		cmd.Stdout = os.Stdout
-	}
-	if stderr != nil {
-		cmd.Stderr = stderr
-	} else {
-		cmd.Stderr = os.Stderr
-	}
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("helm exited with error: %w", err)
-	}
-
-	return nil
-}
-
-// ErrHelmNotInstalled is returned when the helm binary cannot be
-// located on PATH.
-var ErrHelmNotInstalled = errors.New("helm binary not found on PATH")
-
-// Install renders cfg into a temporary values file and runs `helm
-// upgrade --install` with it, deleting the file afterwards. DryRun
-// prints the values and the exact command instead of executing.
-// runner is injectable for tests; nil uses the os/exec default.
-func Install(ctx context.Context, values helmValues, cfg Config, runner HelmRunner) error {
+// Install runs `helm upgrade --install` with the rendered values
+// piped over stdin, so they never touch the argv or disk. stdout
+// carries the CLI transcript: the handoff blank line and banner,
+// helm's captured output, or the dry-run values and exact command.
+func Install(ctx context.Context, values helmValues, cfg Config, shell ProcessRunner, stdout io.Writer) error {
 	data, err := yaml.Marshal(values)
 	if err != nil {
 		return fmt.Errorf("render helm values: %w", err)
 	}
 
-	path, err := writeTempValues(data)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(path)
+	// A blank line hands off from the TUI's last frame.
+	fmt.Fprintln(stdout)
+	fmt.Fprintf(stdout, "Installing helm chart %s:%s as '%s/%s'\n",
+		cfg.ChartName, cfg.ChartVersion, cfg.Namespace, cfg.ReleaseName)
 
-	argv := BuildHelmArgv(cfg, path)
+	argv := BuildHelmArgv(cfg)
 
 	if cfg.DryRun {
-		fmt.Fprintln(os.Stdout, "# Dry run: not executing. Values that would be applied:")
-		fmt.Fprintln(os.Stdout, string(data))
-		fmt.Fprintln(os.Stdout, "# Exact command that would run:")
-		fmt.Fprintln(os.Stdout, ArgvToCommand(runner.Argv(argv)))
+		fmt.Fprintln(stdout, "# Dry run: not executing. Values that would be applied:")
+		fmt.Fprintln(stdout, string(data))
+		fmt.Fprintln(stdout, "# Exact command that would run:")
+		fmt.Fprintln(stdout, "helm "+shellescape.QuoteCommand(argv))
 
 		return nil
 	}
 
-	return runner.Run(ctx, argv, os.Stdout, os.Stderr)
+	out, err := shell.Run(ctx, "helm", data, argv)
+	fmt.Fprint(stdout, string(out))
+	if err != nil {
+		return fmt.Errorf("helm upgrade: %w", err)
+	}
+
+	return nil
 }

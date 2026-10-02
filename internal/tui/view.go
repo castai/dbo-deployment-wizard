@@ -1,42 +1,13 @@
 package tui
 
 import (
-	"strings"
-
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
+	"charm.land/huh/v2"
 )
 
-// page composes the layout every screen uses: title → body → help
-// footer.
-func (m *Model) page(title, body, footer string) string {
-	return lipgloss.JoinVertical(lipgloss.Left,
-		m.styles.Group.Title.Render(title),
-		body,
-		m.styles.Help.ShortDesc.Render(footer),
-	)
-}
-
-// helpFooter returns the help line for the given screen; on review the
-// Enter hint names the action the cursor is on.
-func (m *Model) helpFooter(s screen) string {
-	parts := []string{m.keyChip("↑/↓") + " pick option to edit"}
-	if s == screenReview {
-		enterHint := "edit"
-		if it, ok := m.reviewList.SelectedItem().(reviewItem); ok && it.action {
-			enterHint = "proceed to installation"
-		}
-		parts = append(parts,
-			m.keyChip("Enter")+" "+enterHint,
-			m.keyChip("Esc")+" quit",
-		)
-	}
-
-	return strings.Join(parts, "  ")
-}
-
-func (m *Model) keyChip(k string) string {
-	return m.styles.Help.ShortKey.Render(" " + k + " ")
+// keyChip renders a key hint chip for the screens' help footers.
+func keyChip(styles *huh.Styles, k string) string {
+	return styles.Help.ShortKey.Render(" " + k + " ")
 }
 
 // View dispatches on m.state and wraps the rendered body in the
@@ -47,7 +18,7 @@ func (m *Model) View() tea.View {
 	var body string
 	switch m.state {
 	case screenReview:
-		body = m.viewReview()
+		body = m.review.view()
 	case screenKubeContext:
 		body = m.viewKubeContext()
 	case screenNamespace:
@@ -60,6 +31,8 @@ func (m *Model) View() tea.View {
 		body = m.viewComponents()
 	case screenPoolingCreds:
 		body = m.viewPoolingCreds()
+	case screenConfirm:
+		body = m.confirm.view()
 	default:
 		body = "(unknown screen)"
 	}
@@ -78,10 +51,6 @@ func wrapView(body string) tea.View {
 
 // The form screens render the embedded huh form directly; huh draws
 // its own title and help bar, so no page chrome is added.
-
-func (m *Model) viewReview() string {
-	return m.page("Installing castai-dbo helm chart — review configuration", m.reviewList.View(), m.helpFooter(m.state))
-}
 
 func (m *Model) viewKubeContext() string {
 	return m.kubeContextForm.View()

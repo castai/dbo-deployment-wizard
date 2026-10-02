@@ -1,10 +1,8 @@
 package backend
 
 import (
+	"bytes"
 	"context"
-	"io"
-	"os"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -30,13 +28,19 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 		DryRun:       true,
 	}
 
-	// Argv feeds the printed command; an unexpected Run call fails the
-	// strict mock.
-	helm := backendmocks.NewMockHelmRunner(t)
-	helm.EXPECT().Argv(mock.Anything).Return([]string{"helm", "upgrade", "--install"})
+	// The strict mock fails on any shell run — a dry run must not execute.
+	sh := backendmocks.NewMockProcessRunner(t)
 
+	var out bytes.Buffer
 	values := newHelmValues(cfg)
-	r.NoError(Install(context.Background(), values, cfg, helm))
+	r.NoError(Install(t.Context(), values, cfg, sh, &out))
+
+	rendered := out.String()
+	r.Contains(rendered, "Installing helm chart castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "# Dry run: not executing. Values that would be applied:")
+	r.Contains(rendered, "enabled: true")
+	r.Contains(rendered, "# Exact command that would run:")
+	r.Contains(rendered, "helm upgrade --install castai-dbo castai-dbo --version 1.4.2 --namespace castai-dbo --kube-context kind-test --create-namespace -f -") //nolint:dupword
 }
 
 func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
@@ -56,36 +60,41 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 	}
 
 	k := backendmocks.NewMockKubectl(t)
+	k.EXPECT().ListSecrets(mock.Anything, "kind-test", "castai-dbo").Return(nil, nil)
 	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-agent-credentials",
-		map[string]string{"DATABASE_USERNAME": "agent", "DATABASE_PASSWORD": "agentpass"}).Return(nil)
+		map[string]string{"DATABASE_USERNAME": "agent", "DATABASE_PASSWORD": "agentpass"}, mock.Anything, mock.Anything).Return(nil)
 	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-pooling-credentials",
-		map[string]string{"DATABASE_USERNAME": "pooler", "DATABASE_PASSWORD": "poolpass"}).Return(nil)
+		map[string]string{"DATABASE_USERNAME": "pooler", "DATABASE_PASSWORD": "poolpass"}, mock.Anything, mock.Anything).Return(nil)
 	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-api-key",
-		map[string]string{"API_KEY": "sec"}).Return(nil)
+		map[string]string{"API_KEY": "sec"}, mock.Anything, mock.Anything).Return(nil)
+	k.EXPECT().RolloutStatus(mock.Anything, "kind-test", "castai-dbo", "deployment.apps/db-agent", rolloutTimeout,
+		mock.Anything, mock.Anything).Return(nil)
 
-	var (
-		argv        []string
-		valuesFile  string
-		valuesBytes []byte
-	)
-	helm := backendmocks.NewMockHelmRunner(t)
-	helm.EXPECT().Run(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Run(func(_ context.Context, callArgv []string, _, _ io.Writer) {
-			// Snapshot the values file while it still exists — Install
-			// deletes it right after the call.
-			argv = callArgv
-			i := slices.Index(argv, "-f")
-			valuesFile = argv[i+1]
-			data, err := os.ReadFile(valuesFile)
-			r.NoError(err)
-			valuesBytes = data
+	var valuesBytes []byte
+	sh := backendmocks.NewMockProcessRunner(t)
+	sh.EXPECT().Run(mock.Anything, "helm", mock.Anything,
+		mock.MatchedBy(func(args []string) bool { return args[0] == "upgrade" })).
+		Run(func(_ context.Context, _ string, stdin []byte, _ []string) {
+			valuesBytes = stdin
 		}).
-		Return(nil)
+		Return([]byte("Release \"castai-dbo\" has been upgraded.\n"), nil)
+	sh.EXPECT().Run(mock.Anything, "helm", mock.Anything,
+		mock.MatchedBy(func(args []string) bool { return args[0] == "get" })).
+		Return([]byte("---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: db-agent\n"), nil)
 
-	w := &Wizard{ctx: context.Background(), k: k, helm: helm, cfg: cfg}
-	r.NoError(w.Install())
-	r.Equal("upgrade", argv[0])
-	r.NotEmpty(valuesBytes, "the values file must exist while helm runs")
+	w := &Wizard{ctx: t.Context(), k: k, shell: sh, cfg: cfg}
+	var out bytes.Buffer
+	r.NoError(w.Install(&out))
+
+	// The transcript logs every Secret write, the banner, helm's
+	// output, and the rollout watch.
+	rendered := out.String()
+	r.Contains(rendered, "creating secret castai-dbo-agent-credentials")
+	r.Contains(rendered, "creating secret castai-dbo-pooling-credentials")
+	r.Contains(rendered, "creating secret castai-dbo-api-key")
+	r.Contains(rendered, "Installing helm chart castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "Waiting for deployments of release 'castai-dbo' in 'castai-dbo' to be ready")
+	r.Contains(rendered, "Monitoring: deployment.apps/db-agent")
 
 	// Username/password pairs resolve into Secret refs, and every
 	// enabled component points at the recreated API key Secret.
@@ -107,10 +116,40 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 			},
 		},
 	}, got)
+}
 
-	// The values file is deleted after the install.
-	_, err := os.Stat(valuesFile)
-	r.True(os.IsNotExist(err), "the values file must be deleted after the install, still present at %s", valuesFile)
+func TestWizardDryRun_PrintsSecretCommands(t *testing.T) {
+	r := require.New(t)
+
+	cfg := Config{
+		ReleaseName:  "castai-dbo",
+		ChartName:    "castai-dbo",
+		Namespace:    "castai-dbo",
+		KubeContext:  "kind-test",
+		ChartVersion: "1.4.2",
+		Components:   []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling},
+		AgentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
+		PoolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
+		APIURL:       "https://api.cast.ai",
+		APISecret:    "sec",
+		DryRun:       true,
+	}
+
+	// A dry run must not touch the cluster: the zero-expectation shell
+	// fails on any run; RealKubectl prints the secret commands.
+	sh := backendmocks.NewMockProcessRunner(t)
+	k := &RealKubectl{shell: sh}
+
+	w := &Wizard{ctx: t.Context(), k: k, shell: sh, cfg: cfg}
+	var out bytes.Buffer
+	r.NoError(w.Install(&out))
+
+	// Each Secret write prints the apply command it would run.
+	apply := "kubectl --context kind-test -n castai-dbo apply -f -  # "
+	r.Contains(out.String(), apply+"castai-dbo-agent-credentials")
+	r.Contains(out.String(), apply+"castai-dbo-pooling-credentials")
+	r.Contains(out.String(), apply+"castai-dbo-api-key")
+	r.Contains(out.String(), "# Dry run: not executing. Values that would be applied:")
 }
 
 // TestNewHelmValues_Cartesian asserts the exact values the renderer
@@ -187,8 +226,7 @@ func TestNewHelmValues_Cartesian(t *testing.T) {
 }
 
 // TestBuildHelmArgv_Deterministic locks down the exact argv shape:
-// only the release coordinates, every chart parameter in the values
-// file.
+// only the release coordinates, every chart parameter over stdin.
 func TestBuildHelmArgv_Deterministic(t *testing.T) {
 	r := require.New(t)
 
@@ -208,17 +246,10 @@ func TestBuildHelmArgv_Deterministic(t *testing.T) {
 		"--namespace", "castai-dbo",
 		"--kube-context", "kind-test",
 		"--create-namespace",
-		"--wait",
-		"-f", "/tmp/deployment-wizard-values.yaml",
+		"-f", "-",
 	}
 
-	r.Equal(want, BuildHelmArgv(cfg, "/tmp/deployment-wizard-values.yaml"))
-}
-
-func TestArgvToCommand(t *testing.T) {
-	r := require.New(t)
-
-	r.Equal("echo 'hello world' 'a$b'", ArgvToCommand([]string{"echo", "hello world", "a$b"}))
+	r.Equal(want, BuildHelmArgv(cfg))
 }
 
 // TestHelmValuesMarshal_OmitsEmptySections pins the omitempty

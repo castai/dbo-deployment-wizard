@@ -3,6 +3,7 @@ module github.com/castai/dbo-deployment-wizard
 go 1.27.1
 
 require (
+	al.essio.dev/pkg/shellescape v1.6.1
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.0.8
 	charm.land/huh/v2 v2.0.3

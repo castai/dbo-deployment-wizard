@@ -20,6 +20,11 @@ components, database credentials), shows a review summary, and runs
 - Keep them short: one or two lines, never multi-paragraph essays.
   Explain the *why*, never restate the *what*.
 
+## Slice conversions
+
+- Use `lo.Map` / `lo.FilterMap` whenever converting one slice into
+  another — never a manual `make` + `for` + `append` loop.
+
 ## Testing
 
 - Table tests: declare the cases as `map[string]struct{...}` where the map
@@ -40,6 +45,9 @@ components, database credentials), shows a review summary, and runs
       t.Run(name, func(t *testing.T) { ... })
   }
   ```
+
+- Test helpers take `testing.TB`, never `*testing.T`, so benchmarks
+  and other test variants can share them.
 
 - Mocks are generated with mockery from `.mockery.yaml` and live in
   `mocks/`; always regenerate with `make gen`.

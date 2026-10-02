@@ -3,6 +3,8 @@
 // without importing the service implementation itself.
 package api
 
+import "io"
+
 // Backend is the client-facing contract frontends drive the wizard
 // through. Queries return read-only views of the committed state;
 // commands are the only write path and enforce the domain
@@ -13,6 +15,8 @@ type Backend interface {
 	KubeContext() string
 	Namespace() string
 	ChartVersion() string
+	ReleaseName() string
+
 	AgentCredentials() Credentials
 	PoolingCredentials() Credentials
 	// Components returns the enabled components in selection order.
@@ -24,6 +28,15 @@ type Backend interface {
 	// Secrets returns the Secret names in the selected context and
 	// namespace; a discovery failure returns none.
 	Secrets() []string
+	// DeploymentExists reports whether the committed deployment
+	// coordinates — context, namespace, release name — already hold a
+	// helm release, i.e. whether Install would upgrade it rather
+	// than create a new installation; a lookup failure returns the
+	// error and false.
+	DeploymentExists() (bool, error)
+	// SummarizeInstallationImpact lists, as human-readable lines, what
+	// the install will do
+	SummarizeInstallationImpact() ([]string, error)
 
 	// --- commands ---
 
@@ -44,5 +57,7 @@ type Backend interface {
 	// error; nil means the configuration is ready to install. The
 	// review screen gates its Continue action on it.
 	Validate() error
-	Install() error
+	// Install runs the install, writing the CLI transcript to stdout;
+	// DryRun prints the commands instead of executing.
+	Install(stdout io.Writer) error
 }
