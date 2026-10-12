@@ -5,12 +5,10 @@ package backend
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"slices"
-	"time"
 
 	"github.com/samber/lo"
 
@@ -33,30 +31,6 @@ type Wizard struct {
 	cfg Config
 
 	latestVersion string
-}
-
-// clusterQueryTimeout bounds each cluster lookup: against an unreachable
-// cluster helm waits out a 30s dial and kubectl retries it five times.
-const clusterQueryTimeout = 10 * time.Second
-
-// queryCluster runs one cluster lookup under clusterQueryTimeout and
-// names an expired deadline for what it is: an unreachable cluster.
-func queryCluster[T any](w *Wizard, query func(ctx context.Context) (T, error)) (T, error) {
-	ctx, cancel := context.WithTimeout(w.ctx, clusterQueryTimeout)
-	defer cancel()
-
-	result, err := query(ctx)
-	if errors.Is(err, context.DeadlineExceeded) {
-		return result, fmt.Errorf("kubernetes cluster unreachable: context %q did not respond within %s", w.cfg.KubeContext, clusterQueryTimeout)
-	}
-
-	return result, err
-}
-
-func (w *Wizard) listSecrets() ([]string, error) {
-	return queryCluster(w, func(ctx context.Context) ([]string, error) {
-		return w.k.ListSecrets(ctx, w.cfg.KubeContext, w.cfg.Namespace)
-	})
 }
 
 func (w *Wizard) ReleaseName() string {
@@ -123,7 +97,7 @@ func (w *Wizard) LatestChartVersion() string { return w.latestVersion }
 // context and namespace; a discovery failure returns none (the UI
 // falls back to free-text input).
 func (w *Wizard) Secrets() []string {
-	secrets, err := w.listSecrets()
+	secrets, err := w.k.ListSecrets(w.ctx, w.cfg.KubeContext, w.cfg.Namespace)
 	if err != nil {
 		return nil
 	}
@@ -137,9 +111,7 @@ func (w *Wizard) Secrets() []string {
 // create a new installation. The kubectl layer memoizes lookups by
 // coordinates.
 func (w *Wizard) DeploymentExists() (bool, error) {
-	return queryCluster(w, func(ctx context.Context) (bool, error) {
-		return w.k.HelmReleaseExists(ctx, w.cfg.KubeContext, w.cfg.Namespace, w.cfg.ReleaseName)
-	})
+	return w.k.HelmReleaseExists(w.ctx, w.cfg.KubeContext, w.cfg.Namespace, w.cfg.ReleaseName)
 }
 
 // SummarizeInstallationImpact lists the actions the install will
@@ -157,7 +129,7 @@ func (w *Wizard) SummarizeInstallationImpact() ([]string, error) {
 		deployment = "Existing Helm deployment will be updated:"
 	}
 
-	existingSecrets, _ := w.listSecrets()
+	existingSecrets, _ := w.k.ListSecrets(w.ctx, w.cfg.KubeContext, w.cfg.Namespace)
 	lines := []string{
 		deployment + " " + w.cfg.Namespace + "/" + w.cfg.ReleaseName,
 		secretLine("api key", w.cfg.ReleaseName+"-api-key", existingSecrets),
@@ -235,7 +207,7 @@ func (w *Wizard) Install(stdout io.Writer) error {
 	var existingSecrets []string
 	if !cfg.DryRun {
 		var err error
-		existingSecrets, err = w.listSecrets()
+		existingSecrets, err = w.k.ListSecrets(w.ctx, cfg.KubeContext, cfg.Namespace)
 		if err != nil {
 			return fmt.Errorf("listing existing secrets: %w", err)
 		}

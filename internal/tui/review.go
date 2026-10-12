@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
@@ -279,10 +280,13 @@ type reviewModel struct {
 	// returns from a section (the edit may have fixed it).
 	reviewError string
 
-	// title is the deferred release lookup's answer; fetch stamps each
-	// lookup so stale responses drop.
-	title string
-	fetch int
+	// title is the deferred release lookup's answer, the spinner
+	// standing in while loading; fetch stamps each lookup so stale
+	// responses drop.
+	title   string
+	loading bool
+	fetch   int
+	spinner spinner.Model
 }
 
 func newReviewModel(b api.Backend, styles *huh.Styles, isDark bool) *reviewModel {
@@ -290,7 +294,8 @@ func newReviewModel(b api.Backend, styles *huh.Styles, isDark bool) *reviewModel
 		backend: b,
 		styles:  styles,
 		list:    newItemList(styles, isDark),
-		title:   reviewTitleLoading,
+		loading: true,
+		spinner: newSpinner(styles),
 	}
 	r.sync()
 
@@ -325,13 +330,24 @@ func (r *reviewModel) backToReview() {
 // load defers the release lookup to a background command: it shells
 // out to helm, which run from view froze the UI — Ctrl+C included.
 func (r *reviewModel) load() tea.Cmd {
-	r.title = reviewTitleLoading
+	r.loading = true
 	r.fetch++
 	b, fetch := r.backend, r.fetch
 
-	return func() tea.Msg {
+	return tea.Batch(r.spinner.Tick, func() tea.Msg {
 		return reviewTitleMsg{title: reviewTitle(b), fetch: fetch}
+	})
+}
+
+// tick animates the spinner, re-arming it only while the lookup runs.
+func (r *reviewModel) tick(msg spinner.TickMsg) tea.Cmd {
+	if !r.loading {
+		return nil
 	}
+	var cmd tea.Cmd
+	r.spinner, cmd = r.spinner.Update(msg)
+
+	return cmd
 }
 
 // setTitle applies a deferred title, dropping responses a newer lookup
@@ -340,6 +356,7 @@ func (r *reviewModel) setTitle(msg reviewTitleMsg) {
 	if msg.fetch != r.fetch {
 		return
 	}
+	r.loading = false
 	r.title = msg.title
 }
 
@@ -373,8 +390,13 @@ func (r *reviewModel) update(msg tea.KeyPressMsg) (tea.Cmd, screen) {
 
 // view renders the whole screen: title, rows, help footer.
 func (r *reviewModel) view() string {
+	title := r.title
+	if r.loading {
+		title = r.spinner.View() + " " + reviewTitleLoading
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
-		r.styles.Group.Title.Render(r.title),
+		r.styles.Group.Title.Render(title),
 		r.list.View(),
 		r.styles.Help.ShortDesc.Render(r.footer()),
 	)

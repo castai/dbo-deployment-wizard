@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
@@ -170,6 +171,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.confirm.update(typed)
 	case reviewTitleMsg:
 		m.review.setTitle(typed)
+	case spinner.TickMsg:
+		// huh's own loading spinners tick through the same message type.
+		cmd = tea.Batch(m.review.tick(typed), m.confirm.tick(typed), m.updateActiveForm(msg))
 	case tea.BackgroundColorMsg:
 		_, _ = forwardToForm(&m.kubeContextForm, typed)
 		_, _ = forwardToForm(&m.poolingCredsForm, typed)
@@ -178,13 +182,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_, _ = forwardToForm(&m.componentsForm, typed)
 		_, _ = forwardToForm(&m.agentCredsForm, typed)
 	default:
-		if f := m.activeForm(); f != nil {
-			var done bool
-			cmd, done = forwardToForm(f, msg)
-			if done {
-				m.completeForm()
-			}
-		}
+		cmd = m.updateActiveForm(msg)
 	}
 
 	if m.state != before {
@@ -303,6 +301,21 @@ func forwardToForm(f **huh.Form, msg tea.Msg) (tea.Cmd, bool) {
 	*f = form
 
 	return cmd, form.State != huh.StateNormal
+}
+
+// updateActiveForm routes a non-key message into the current screen's
+// form, committing it if that completed it.
+func (m *Model) updateActiveForm(msg tea.Msg) tea.Cmd {
+	f := m.activeForm()
+	if f == nil {
+		return nil
+	}
+	cmd, done := forwardToForm(f, msg)
+	if done {
+		m.completeForm()
+	}
+
+	return cmd
 }
 
 // activeForm returns the form embedded in the current screen, if any.

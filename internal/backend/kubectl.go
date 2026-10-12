@@ -116,8 +116,9 @@ func (k *RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace st
 // while its not-found line, which a missing namespace also answers
 // with, reads as a new installation. Results are memoized by release
 // coordinates — failures included, so a broken lookup doesn't
-// re-shell-out on every entry — except a lookup the caller's context
-// cut short, which says nothing about the release and is retried.
+// re-shell-out on every entry — except a lookup that timed out or the
+// caller's context cut short, which says nothing about the release
+// and is retried.
 func (k *RealKubectl) HelmReleaseExists(ctx context.Context, kubeContext, namespace, releaseName string) (bool, error) {
 	key := releaseKey{kubeContext: kubeContext, namespace: namespace, releaseName: releaseName}
 
@@ -129,7 +130,7 @@ func (k *RealKubectl) HelmReleaseExists(ctx context.Context, kubeContext, namesp
 	}
 
 	result := k.lookupHelmRelease(ctx, kubeContext, namespace, releaseName)
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || errors.Is(result.err, ErrClusterUnreachable) {
 		return result.exists, result.err
 	}
 
@@ -148,8 +149,10 @@ func (k *RealKubectl) lookupHelmRelease(ctx context.Context, kubeContext, namesp
 	type helmStatus struct {
 		Name string `json:"name"`
 	}
-	status, err := runHelmJSON[helmStatus](ctx, k.shell, []string{
-		"status", releaseName, "-n", namespace, "--kube-context", kubeContext, //nolint:goconst
+	status, err := bounded(ctx, func(ctx context.Context) (helmStatus, error) {
+		return runHelmJSON[helmStatus](ctx, k.shell, []string{
+			"status", releaseName, "-n", namespace, "--kube-context", kubeContext, //nolint:goconst
+		})
 	})
 	if err != nil {
 		if errors.Is(err, ErrHelmReleaseNotFound) {
@@ -166,8 +169,32 @@ func (k *RealKubectl) lookupHelmRelease(ctx context.Context, kubeContext, namesp
 	return releaseLookup{exists: true}
 }
 
+// clusterTimeout bounds one captured kubectl or helm call: against an
+// unreachable cluster helm waits out a 30s dial and kubectl retries it
+// five times.
+const clusterTimeout = 10 * time.Second
+
+// ErrClusterUnreachable is a cluster call that outran clusterTimeout.
+var ErrClusterUnreachable = errors.New("kubernetes cluster unreachable")
+
+// bounded runs one cluster call under clusterTimeout and names an
+// expired deadline for what it is.
+func bounded[T any](ctx context.Context, call func(ctx context.Context) (T, error)) (T, error) {
+	ctx, cancel := context.WithTimeout(ctx, clusterTimeout)
+	defer cancel()
+
+	result, err := call(ctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return result, fmt.Errorf("%w: no answer within %s", ErrClusterUnreachable, clusterTimeout)
+	}
+
+	return result, err
+}
+
 func (k *RealKubectl) runKubectl(ctx context.Context, stdin []byte, args []string) ([]byte, error) {
-	return k.shell.Run(ctx, "kubectl", stdin, args)
+	return bounded(ctx, func(ctx context.Context) ([]byte, error) {
+		return k.shell.Run(ctx, "kubectl", stdin, args)
+	})
 }
 
 // secretManifest is the kubectl-applied Secret schema.

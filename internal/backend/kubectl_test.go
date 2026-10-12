@@ -3,7 +3,10 @@ package backend
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -104,6 +107,21 @@ func TestHelmReleaseExists(t *testing.T) {
 		}
 	})
 
+	t.Run("retries a timed out lookup", func(t *testing.T) {
+		sh := backendmocks.NewMockProcessRunner(t)
+		for range 2 {
+			expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"), "", context.DeadlineExceeded)
+		}
+
+		k := &RealKubectl{shell: sh}
+
+		for range 2 {
+			exists, err := k.HelmReleaseExists(t.Context(), "kind-test", "castai-db-optimizer", "castai-dbo")
+			require.ErrorIs(t, err, ErrClusterUnreachable)
+			require.False(t, exists)
+		}
+	})
+
 	t.Run("retries a lookup its context cut short", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
@@ -121,4 +139,47 @@ func TestHelmReleaseExists(t *testing.T) {
 			require.False(t, exists)
 		}
 	})
+}
+
+// An unreachable cluster keeps kubectl and helm waiting far longer than
+// the UI can; every captured cluster call must carry a deadline.
+func TestClusterCalls_AreBounded(t *testing.T) {
+	tests := map[string]func(ctx context.Context, k *RealKubectl){
+		"list secrets": func(ctx context.Context, k *RealKubectl) {
+			_, _ = k.ListSecrets(ctx, "kind-test", "castai-db-optimizer")
+		},
+		"helm release exists": func(ctx context.Context, k *RealKubectl) {
+			_, _ = k.HelmReleaseExists(ctx, "kind-test", "castai-db-optimizer", "castai-dbo")
+		},
+		"ensure secret": func(ctx context.Context, k *RealKubectl) {
+			_ = k.EnsureSecret(ctx, "kind-test", "castai-db-optimizer", "creds", nil, io.Discard, false)
+		},
+	}
+	for name, call := range tests {
+		t.Run(name, func(t *testing.T) {
+			sh := backendmocks.NewMockProcessRunner(t)
+			sh.EXPECT().Run(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				RunAndReturn(func(ctx context.Context, _ string, _ []byte, _ []string) ([]byte, error) {
+					deadline, ok := ctx.Deadline()
+					require.True(t, ok, "cluster call ran without a deadline")
+					require.LessOrEqual(t, time.Until(deadline), clusterTimeout)
+
+					return nil, context.DeadlineExceeded
+				}).
+				Once()
+
+			call(t.Context(), &RealKubectl{shell: sh})
+		})
+	}
+}
+
+func TestListSecrets_TimeoutReportsClusterUnreachable(t *testing.T) {
+	sh := backendmocks.NewMockProcessRunner(t)
+	sh.EXPECT().Run(mock.Anything, "kubectl", mock.Anything, mock.Anything).
+		Once().
+		Return(nil, fmt.Errorf("kubectl get secret: %w", context.DeadlineExceeded))
+
+	_, err := (&RealKubectl{shell: sh}).ListSecrets(t.Context(), "kind-test", "castai-db-optimizer")
+
+	require.EqualError(t, err, "kubernetes cluster unreachable: no answer within 10s")
 }
