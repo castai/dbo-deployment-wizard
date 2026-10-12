@@ -22,7 +22,7 @@ jobs:
   changes:
     name: Changes
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       pull-requests: read
@@ -51,7 +51,7 @@ jobs:
     # Runs unless the filter explicitly said "no source changes": pushes to
     # main (filter skipped) and a failed filter both fall through to a full run.
     if: ${{ !cancelled() && needs.changes.outputs.src != 'false' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -69,7 +69,7 @@ jobs:
     name: Lint
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.src != 'false' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
