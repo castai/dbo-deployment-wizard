@@ -17,8 +17,37 @@ env:
   GOLANGCI_LINT_VERSION: v2.14.0
 
 jobs:
+  # Test and Lint are required checks: gate them per job (a skipped job passes),
+  # never with workflow-level `paths`, which would leave them pending forever.
+  changes:
+    name: Changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      - uses: dorny/paths-filter@v4.0.3
+        id: filter
+        with:
+          predicate-quantifier: some-with-excludes
+          # Everything counts as source except top-level docs, so new file
+          # types run CI by default.
+          filters: |
+            src:
+              - '**'
+              - '!*.md'
+              - '!docs/**'
+              - '!LICENSE*'
+
   test:
     name: Test
+    needs: changes
+    # Runs unless the filter explicitly said "no source changes": pushes to
+    # main (filter skipped) and a failed filter both fall through to a full run.
+    if: ${{ !cancelled() && needs.changes.outputs.src != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -35,6 +64,8 @@ jobs:
 
   lint:
     name: Lint
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.src != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
