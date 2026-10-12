@@ -32,15 +32,18 @@ jobs:
       - uses: dorny/paths-filter@v4.0.3
         id: filter
         with:
-          predicate-quantifier: some-with-excludes
-          # Everything counts as source except top-level docs, so new file
-          # types run CI by default.
+          # Only inputs of `make test` / lint; a new kind of input (e.g. an
+          # embedded non-Go file outside testdata) must be added here.
           filters: |
             src:
-              - '**'
-              - '!*.md'
-              - '!docs/**'
-              - '!LICENSE*'
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - '**/testdata/**'
+              - 'Makefile'
+              - '.golangci.yml'
+              - '.mockery.yaml'
+              - '.github/workflows/ci.yaml'
 
   test:
     name: Test
