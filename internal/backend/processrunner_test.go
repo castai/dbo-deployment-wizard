@@ -1,13 +1,30 @@
 package backend
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	backendmocks "github.com/castai/dbo-deployment-wizard/mocks/backend"
 )
+
+// A killed program's orphaned child keeps the output pipes open; Run
+// must still return once the deadline passes.
+func TestRealProcessRunnerRun_ReturnsOnDeadline(t *testing.T) {
+	r := require.New(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := (&RealProcessRunner{}).Run(ctx, "sh", nil, []string{"-c", "sleep 20 & wait"})
+
+	r.ErrorIs(err, context.DeadlineExceeded)
+	r.Less(time.Since(start), 10*time.Second)
+}
 
 func TestRunHelmYAML(t *testing.T) {
 	type sampleResult struct {

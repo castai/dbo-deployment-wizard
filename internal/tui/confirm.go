@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
@@ -21,13 +22,14 @@ type confirmModel struct {
 	lines   []string
 	err     error
 	loading bool
+	spinner spinner.Model
 
 	// fetch stamps each entry so stale responses drop.
 	fetch int
 }
 
 func newConfirmModel(b api.Backend, styles *huh.Styles) *confirmModel {
-	return &confirmModel{backend: b, styles: styles}
+	return &confirmModel{backend: b, styles: styles, spinner: newSpinner(styles)}
 }
 
 // confirmSummaryMsg delivers the screen's deferred summary; fetch
@@ -47,11 +49,22 @@ func (c *confirmModel) enter() tea.Cmd {
 	c.fetch++
 	b, fetch := c.backend, c.fetch
 
-	return func() tea.Msg {
+	return tea.Batch(c.spinner.Tick, func() tea.Msg {
 		lines, err := b.SummarizeInstallationImpact()
 
 		return confirmSummaryMsg{lines: lines, err: err, fetch: fetch}
+	})
+}
+
+// tick animates the spinner, re-arming it only while the summary loads.
+func (c *confirmModel) tick(msg spinner.TickMsg) tea.Cmd {
+	if !c.loading {
+		return nil
 	}
+	var cmd tea.Cmd
+	c.spinner, cmd = c.spinner.Update(msg)
+
+	return cmd
 }
 
 // update applies a deferred summary, dropping responses a newer entry
@@ -64,6 +77,13 @@ func (c *confirmModel) update(msg confirmSummaryMsg) {
 	c.lines, c.err = msg.lines, msg.err
 }
 
+// ready reports whether Apply is available: only once the summary has
+// loaded and succeeded, so the user never applies a change the wizard
+// could not preview.
+func (c *confirmModel) ready() bool {
+	return !c.loading && c.err == nil
+}
+
 // view renders the whole screen: title, summary, Apply button, help
 // footer.
 func (c *confirmModel) view() string {
@@ -71,7 +91,7 @@ func (c *confirmModel) view() string {
 	var body strings.Builder
 	fmt.Fprintln(&body)
 	if c.loading {
-		fmt.Fprintln(&body, c.styles.Focused.Description.Render("Gathering installation summary…"))
+		fmt.Fprintln(&body, c.spinner.View()+" "+c.styles.Focused.Description.Render("Gathering installation summary…"))
 	} else {
 		for _, line := range c.lines {
 			fmt.Fprintln(&body, c.styles.Focused.File.Render(line))
@@ -85,7 +105,7 @@ func (c *confirmModel) view() string {
 
 	fmt.Fprintln(&body)
 	button := c.styles.Focused.FocusedButton
-	if c.loading {
+	if !c.ready() {
 		button = c.styles.Blurred.BlurredButton
 	}
 	fmt.Fprintln(&body, button.Render("Apply"))
@@ -98,11 +118,11 @@ func (c *confirmModel) view() string {
 	)
 }
 
-// footer builds the help line; the Enter hint appears once the summary
-// has loaded.
+// footer builds the help line; the Enter hint appears once Apply is
+// available.
 func (c *confirmModel) footer() string {
 	parts := []string{}
-	if !c.loading {
+	if c.ready() {
 		parts = append(parts, keyChip(c.styles, "Enter")+" apply")
 	}
 	parts = append(parts, keyChip(c.styles, "Esc")+" back")

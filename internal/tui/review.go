@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
@@ -179,6 +180,16 @@ func chartVersionDisplay(version, latestVersion string) string {
 	return emptyDash(version)
 }
 
+// reviewTitleLoading is the title while the release lookup is in flight.
+const reviewTitleLoading = "Checking for an existing Helm deployment…"
+
+// reviewTitleMsg delivers the review screen's deferred title; fetch
+// identifies which lookup it answers.
+type reviewTitleMsg struct {
+	title string
+	fetch int
+}
+
 // reviewTitle renders the review screen's title; the suffix names
 // whether the committed coordinates hold an existing release the
 // install would upgrade, or none — a new installation it would
@@ -268,6 +279,14 @@ type reviewModel struct {
 	// rendered above the Continue action; cleared when the user
 	// returns from a section (the edit may have fixed it).
 	reviewError string
+
+	// title is the deferred release lookup's answer, the spinner
+	// standing in while loading; fetch stamps each lookup so stale
+	// responses drop.
+	title   string
+	loading bool
+	fetch   int
+	spinner spinner.Model
 }
 
 func newReviewModel(b api.Backend, styles *huh.Styles, isDark bool) *reviewModel {
@@ -275,6 +294,8 @@ func newReviewModel(b api.Backend, styles *huh.Styles, isDark bool) *reviewModel
 		backend: b,
 		styles:  styles,
 		list:    newItemList(styles, isDark),
+		loading: true,
+		spinner: newSpinner(styles),
 	}
 	r.sync()
 
@@ -304,6 +325,39 @@ func (r *reviewModel) sync() {
 func (r *reviewModel) backToReview() {
 	r.reviewError = ""
 	r.sync()
+}
+
+// load defers the release lookup to a background command: it shells
+// out to helm, which run from view froze the UI — Ctrl+C included.
+func (r *reviewModel) load() tea.Cmd {
+	r.loading = true
+	r.fetch++
+	b, fetch := r.backend, r.fetch
+
+	return tea.Batch(r.spinner.Tick, func() tea.Msg {
+		return reviewTitleMsg{title: reviewTitle(b), fetch: fetch}
+	})
+}
+
+// tick animates the spinner, re-arming it only while the lookup runs.
+func (r *reviewModel) tick(msg spinner.TickMsg) tea.Cmd {
+	if !r.loading {
+		return nil
+	}
+	var cmd tea.Cmd
+	r.spinner, cmd = r.spinner.Update(msg)
+
+	return cmd
+}
+
+// setTitle applies a deferred title, dropping responses a newer lookup
+// has superseded.
+func (r *reviewModel) setTitle(msg reviewTitleMsg) {
+	if msg.fetch != r.fetch {
+		return
+	}
+	r.loading = false
+	r.title = msg.title
 }
 
 // update routes the review screen's keys; the second return names the
@@ -336,8 +390,13 @@ func (r *reviewModel) update(msg tea.KeyPressMsg) (tea.Cmd, screen) {
 
 // view renders the whole screen: title, rows, help footer.
 func (r *reviewModel) view() string {
+	title := r.title
+	if r.loading {
+		title = r.spinner.View() + " " + reviewTitleLoading
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
-		r.styles.Group.Title.Render(reviewTitle(r.backend)),
+		r.styles.Group.Title.Render(title),
 		r.list.View(),
 		r.styles.Help.ShortDesc.Render(r.footer()),
 	)

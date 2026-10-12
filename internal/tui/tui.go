@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
@@ -153,7 +154,7 @@ func (m *Model) setCurrentScreen(s screen) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return repaintIn()
+	return tea.Batch(repaintIn(), m.review.load())
 }
 
 //nolint:ireturn // bubbletea v2 Model.Update mandates a tea.Model return.
@@ -168,6 +169,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_, cmd = m.handleKey(typed)
 	case confirmSummaryMsg:
 		m.confirm.update(typed)
+	case reviewTitleMsg:
+		m.review.setTitle(typed)
+	case spinner.TickMsg:
+		// huh's own loading spinners tick through the same message type.
+		cmd = tea.Batch(m.review.tick(typed), m.confirm.tick(typed), m.updateActiveForm(msg))
 	case tea.BackgroundColorMsg:
 		_, _ = forwardToForm(&m.kubeContextForm, typed)
 		_, _ = forwardToForm(&m.poolingCredsForm, typed)
@@ -176,17 +182,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_, _ = forwardToForm(&m.componentsForm, typed)
 		_, _ = forwardToForm(&m.agentCredsForm, typed)
 	default:
-		if f := m.activeForm(); f != nil {
-			var done bool
-			cmd, done = forwardToForm(f, msg)
-			if done {
-				m.completeForm()
-			}
-		}
+		cmd = m.updateActiveForm(msg)
 	}
 
 	if m.state != before {
 		cmd = tea.Batch(cmd, tea.ClearScreen)
+		// The edit may have changed the release coordinates.
+		if m.state == screenReview {
+			cmd = tea.Batch(cmd, m.review.load())
+		}
 	}
 
 	return m, cmd
@@ -267,9 +271,9 @@ func (m *Model) handleReview(msg tea.KeyPressMsg) tea.Cmd {
 // has loaded — the program quits and the install continues in plain
 // CLI mode. Enter while loading does nothing, so a double-click
 // through from review can never apply a summary the user has not
-// seen.
+// seen; nor does it when the summary failed.
 func (m *Model) handleConfirm(msg tea.KeyPressMsg) tea.Cmd {
-	if isConfirmAction(msg) && !m.confirm.loading {
+	if isConfirmAction(msg) && m.confirm.ready() {
 		m.done = true
 
 		return tea.Quit
@@ -297,6 +301,21 @@ func forwardToForm(f **huh.Form, msg tea.Msg) (tea.Cmd, bool) {
 	*f = form
 
 	return cmd, form.State != huh.StateNormal
+}
+
+// updateActiveForm routes a non-key message into the current screen's
+// form, committing it if that completed it.
+func (m *Model) updateActiveForm(msg tea.Msg) tea.Cmd {
+	f := m.activeForm()
+	if f == nil {
+		return nil
+	}
+	cmd, done := forwardToForm(f, msg)
+	if done {
+		m.completeForm()
+	}
+
+	return cmd
 }
 
 // activeForm returns the form embedded in the current screen, if any.
