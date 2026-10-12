@@ -33,14 +33,10 @@ type Kubectl interface {
 type RealKubectl struct {
 	// releaseCache memoizes HelmReleaseExists results by release
 	// coordinates; the UI re-checks on every review and confirm entry,
-	// from background commands — hence the lock.
-	releaseCacheMu sync.Mutex
-	releaseCache   map[releaseKey]releaseLookup
+	// from background commands.
+	releaseCache syncCache[releaseKey, releaseLookup]
 
-	// probe is the reachability verdict for the context probed last;
-	// the lock is held across a probe so concurrent callers share it.
-	probeMu sync.Mutex
-	probe   *contextProbe
+	probe contextProbe
 
 	shell ProcessRunner
 }
@@ -64,9 +60,12 @@ type releaseLookup struct {
 	err    error
 }
 
-// contextProbe is one context's reachability verdict; err is why it
-// was deemed unreachable.
+// contextProbe is the reachability verdict for the context probed
+// last; err is why it was deemed unreachable. The lock is held across
+// a probe so concurrent callers share it.
 type contextProbe struct {
+	mu          sync.Mutex
+	probed      bool
 	kubeContext string
 	err         error
 }
@@ -138,10 +137,7 @@ func (k *RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace st
 func (k *RealKubectl) HelmReleaseExists(ctx context.Context, kubeContext, namespace, releaseName string) (bool, error) {
 	key := releaseKey{kubeContext: kubeContext, namespace: namespace, releaseName: releaseName}
 
-	k.releaseCacheMu.Lock()
-	cached, ok := k.releaseCache[key]
-	k.releaseCacheMu.Unlock()
-	if ok {
+	if cached, ok := k.releaseCache.get(key); ok {
 		return cached.exists, cached.err
 	}
 
@@ -150,12 +146,7 @@ func (k *RealKubectl) HelmReleaseExists(ctx context.Context, kubeContext, namesp
 		return result.exists, result.err
 	}
 
-	k.releaseCacheMu.Lock()
-	defer k.releaseCacheMu.Unlock()
-	if k.releaseCache == nil {
-		k.releaseCache = map[releaseKey]releaseLookup{}
-	}
-	k.releaseCache[key] = result
+	k.releaseCache.put(key, result)
 
 	return result.exists, result.err
 }
@@ -207,11 +198,12 @@ var ErrClusterUnreachable = errors.New("kubernetes cluster unreachable")
 // costs one connectTimeout, not one per call, and is not retried until
 // the user picks a different context.
 func (k *RealKubectl) reachable(ctx context.Context, kubeContext string) error {
-	k.probeMu.Lock()
-	defer k.probeMu.Unlock()
+	p := &k.probe
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	if k.probe != nil && k.probe.kubeContext == kubeContext {
-		return k.probe.err
+	if p.probed && p.kubeContext == kubeContext {
+		return p.err
 	}
 
 	probeCtx, cancel := context.WithTimeout(ctx, connectTimeout)
@@ -229,7 +221,7 @@ func (k *RealKubectl) reachable(ctx context.Context, kubeContext string) error {
 	case err != nil:
 		err = fmt.Errorf("%w: %w", ErrClusterUnreachable, err)
 	}
-	k.probe = &contextProbe{kubeContext: kubeContext, err: err}
+	p.probed, p.kubeContext, p.err = true, kubeContext, err
 
 	return err
 }

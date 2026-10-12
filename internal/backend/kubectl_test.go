@@ -39,7 +39,7 @@ func probeArgs(kubeContext string) []string {
 // reachableKubectl is a RealKubectl whose probe already found
 // kubeContext reachable, so a test stubs only the call under test.
 func reachableKubectl(sh ProcessRunner, kubeContext string) *RealKubectl {
-	return &RealKubectl{shell: sh, probe: &contextProbe{kubeContext: kubeContext}}
+	return &RealKubectl{shell: sh, probe: contextProbe{probed: true, kubeContext: kubeContext}}
 }
 
 func TestHelmReleaseExists(t *testing.T) {
