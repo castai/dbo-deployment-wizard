@@ -49,6 +49,10 @@ components, database credentials), shows a review summary, and runs
 - Test helpers take `testing.TB`, never `*testing.T`, so benchmarks
   and other test variants can share them.
 
+- Assertions: construct an asserter with `r := require.New(t)` at the
+  top of each test, subtest and helper, and call `r.Equal(...)` etc. —
+  never the package-level `require.Equal(t, ...)` form.
+
 - Mocks are generated with mockery from `.mockery.yaml` and live in
   `mocks/`; always regenerate with `make gen`, never edit them by hand.
 - Run tests with `make test`; lint with `make lint` (or `make fix` to

@@ -47,11 +47,13 @@ func newTestReviewModel(b api.Backend) *reviewModel {
 
 // runLoad starts a lookup and runs it to its answer, returning the
 // spinner's first tick alongside.
-func runLoad(t testing.TB, r *reviewModel) (reviewTitleMsg, spinner.TickMsg) {
+func runLoad(t testing.TB, review *reviewModel) (reviewTitleMsg, spinner.TickMsg) {
 	t.Helper()
 
-	batch, ok := r.load()().(tea.BatchMsg)
-	require.True(t, ok)
+	r := require.New(t)
+
+	batch, ok := review.load()().(tea.BatchMsg)
+	r.True(ok)
 
 	var title reviewTitleMsg
 	var tick spinner.TickMsg
@@ -70,21 +72,23 @@ func runLoad(t testing.TB, r *reviewModel) (reviewTitleMsg, spinner.TickMsg) {
 // The release lookup shells out to helm, which blocks for as long as
 // an unreachable cluster keeps it waiting; rendering must never run it.
 func TestReviewView_DoesNotLookUpTheRelease(t *testing.T) {
+	r := require.New(t)
+
 	b := &stubBackend{}
-	r := newTestReviewModel(b)
+	review := newTestReviewModel(b)
 
-	require.Contains(t, r.view(), reviewTitleLoading)
+	r.Contains(review.view(), reviewTitleLoading)
 
-	cmd := r.load()
-	require.Contains(t, r.view(), reviewTitleLoading)
-	require.Zero(t, b.lookups)
-	require.NotNil(t, cmd)
+	cmd := review.load()
+	r.Contains(review.view(), reviewTitleLoading)
+	r.Zero(b.lookups)
+	r.NotNil(cmd)
 
-	msg, _ := runLoad(t, r)
-	r.setTitle(msg)
+	msg, _ := runLoad(t, review)
+	review.setTitle(msg)
 
-	require.Contains(t, r.view(), "Installing new Helm deployment: castai-dbo")
-	require.Equal(t, 1, b.lookups)
+	r.Contains(review.view(), "Installing new Helm deployment: castai-dbo")
+	r.Equal(1, b.lookups)
 }
 
 func TestReviewLoad_Title(t *testing.T) {
@@ -99,39 +103,43 @@ func TestReviewLoad_Title(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			r := newTestReviewModel(&stubBackend{exists: tt.exists, err: tt.err})
+			r := require.New(t)
+			review := newTestReviewModel(&stubBackend{exists: tt.exists, err: tt.err})
 
-			msg, _ := runLoad(t, r)
-			r.setTitle(msg)
+			msg, _ := runLoad(t, review)
+			review.setTitle(msg)
 
-			require.Equal(t, tt.want, r.title)
+			r.Equal(tt.want, review.title)
 		})
 	}
 }
 
 func TestReviewSetTitle_DropsSupersededLookups(t *testing.T) {
-	b := &stubBackend{}
-	r := newTestReviewModel(b)
+	r := require.New(t)
 
-	stale, _ := runLoad(t, r)
+	b := &stubBackend{}
+	review := newTestReviewModel(b)
+
+	stale, _ := runLoad(t, review)
 
 	b.exists = true
-	fresh, _ := runLoad(t, r)
+	fresh, _ := runLoad(t, review)
 
-	r.setTitle(fresh)
-	r.setTitle(stale)
+	review.setTitle(fresh)
+	review.setTitle(stale)
 
-	require.Equal(t, "Updating Helm deployment: castai-dbo", r.title)
+	r.Equal("Updating Helm deployment: castai-dbo", review.title)
 }
 
 func TestReviewTick_SpinsOnlyWhileLoading(t *testing.T) {
-	r := newTestReviewModel(&stubBackend{})
+	r := require.New(t)
+	review := newTestReviewModel(&stubBackend{})
 
-	msg, tick := runLoad(t, r)
-	frame := r.view()
-	require.NotNil(t, r.tick(tick))
-	require.NotEqual(t, frame, r.view())
+	msg, tick := runLoad(t, review)
+	frame := review.view()
+	r.NotNil(review.tick(tick))
+	r.NotEqual(frame, review.view())
 
-	r.setTitle(msg)
-	require.Nil(t, r.tick(tick))
+	review.setTitle(msg)
+	r.Nil(review.tick(tick))
 }

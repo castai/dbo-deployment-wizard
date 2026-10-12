@@ -12,10 +12,12 @@ import (
 )
 
 func TestConfirmTick_SpinsOnlyWhileLoading(t *testing.T) {
+	r := require.New(t)
+
 	c := newConfirmModel(&stubBackend{}, huh.ThemeFunc(huh.ThemeCharm).Theme(true))
 
 	batch, ok := c.enter()().(tea.BatchMsg)
-	require.True(t, ok)
+	r.True(ok)
 
 	var summary confirmSummaryMsg
 	var tick spinner.TickMsg
@@ -29,13 +31,13 @@ func TestConfirmTick_SpinsOnlyWhileLoading(t *testing.T) {
 	}
 
 	frame := c.view()
-	require.Contains(t, frame, "Gathering installation summary…")
-	require.NotNil(t, c.tick(tick))
-	require.NotEqual(t, frame, c.view())
+	r.Contains(frame, "Gathering installation summary…")
+	r.NotNil(c.tick(tick))
+	r.NotEqual(frame, c.view())
 
 	c.update(summary)
-	require.Nil(t, c.tick(tick))
-	require.Contains(t, c.view(), "New Helm deployment will be created")
+	r.Nil(c.tick(tick))
+	r.Contains(c.view(), "New Helm deployment will be created")
 }
 
 // A summary that failed is a change the wizard could not preview;
@@ -52,11 +54,13 @@ func TestConfirmReady(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
+			r := require.New(t)
+
 			c := newConfirmModel(&stubBackend{}, huh.ThemeFunc(huh.ThemeCharm).Theme(true))
 			c.loading, c.err = tt.loading, tt.err
 
-			require.Equal(t, tt.want, c.ready())
-			require.Equal(t, tt.want, strings.Contains(c.footer(), "apply"))
+			r.Equal(tt.want, c.ready())
+			r.Equal(tt.want, strings.Contains(c.footer(), "apply"))
 		})
 	}
 }
