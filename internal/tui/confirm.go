@@ -77,6 +77,13 @@ func (c *confirmModel) update(msg confirmSummaryMsg) {
 	c.lines, c.err = msg.lines, msg.err
 }
 
+// ready reports whether Apply is available: only once the summary has
+// loaded and succeeded, so the user never applies a change the wizard
+// could not preview.
+func (c *confirmModel) ready() bool {
+	return !c.loading && c.err == nil
+}
+
 // view renders the whole screen: title, summary, Apply button, help
 // footer.
 func (c *confirmModel) view() string {
@@ -98,7 +105,7 @@ func (c *confirmModel) view() string {
 
 	fmt.Fprintln(&body)
 	button := c.styles.Focused.FocusedButton
-	if c.loading {
+	if !c.ready() {
 		button = c.styles.Blurred.BlurredButton
 	}
 	fmt.Fprintln(&body, button.Render("Apply"))
@@ -111,11 +118,11 @@ func (c *confirmModel) view() string {
 	)
 }
 
-// footer builds the help line; the Enter hint appears once the summary
-// has loaded.
+// footer builds the help line; the Enter hint appears once Apply is
+// available.
 func (c *confirmModel) footer() string {
 	parts := []string{}
-	if !c.loading {
+	if c.ready() {
 		parts = append(parts, keyChip(c.styles, "Enter")+" apply")
 	}
 	parts = append(parts, keyChip(c.styles, "Esc")+" back")

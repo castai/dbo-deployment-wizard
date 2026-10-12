@@ -129,7 +129,11 @@ func (w *Wizard) SummarizeInstallationImpact() ([]string, error) {
 		deployment = "Existing Helm deployment will be updated:"
 	}
 
-	existingSecrets, _ := w.k.ListSecrets(w.ctx, w.cfg.KubeContext, w.cfg.Namespace)
+	existingSecrets, err := w.k.ListSecrets(w.ctx, w.cfg.KubeContext, w.cfg.Namespace)
+	if err != nil {
+		return nil, fmt.Errorf("listing existing secrets: %w", err)
+	}
+
 	lines := []string{
 		deployment + " " + w.cfg.Namespace + "/" + w.cfg.ReleaseName,
 		secretLine("api key", w.cfg.ReleaseName+"-api-key", existingSecrets),

@@ -271,9 +271,9 @@ func (m *Model) handleReview(msg tea.KeyPressMsg) tea.Cmd {
 // has loaded — the program quits and the install continues in plain
 // CLI mode. Enter while loading does nothing, so a double-click
 // through from review can never apply a summary the user has not
-// seen.
+// seen; nor does it when the summary failed.
 func (m *Model) handleConfirm(msg tea.KeyPressMsg) tea.Cmd {
-	if isConfirmAction(msg) && !m.confirm.loading {
+	if isConfirmAction(msg) && m.confirm.ready() {
 		m.done = true
 
 		return tea.Quit

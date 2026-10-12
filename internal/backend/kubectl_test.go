@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -32,13 +31,24 @@ func expectHelmCall(sh *backendmocks.MockProcessRunner, args []string, out strin
 		Return([]byte(out), err)
 }
 
+// probeArgs is the reachability probe's argv.
+func probeArgs(kubeContext string) []string {
+	return []string{"--context", kubeContext, "get", "--raw", "/version"}
+}
+
+// reachableKubectl is a RealKubectl whose probe already found
+// kubeContext reachable, so a test stubs only the call under test.
+func reachableKubectl(sh ProcessRunner, kubeContext string) *RealKubectl {
+	return &RealKubectl{shell: sh, probe: &contextProbe{kubeContext: kubeContext}}
+}
+
 func TestHelmReleaseExists(t *testing.T) {
 	t.Run("caches by coordinates", func(t *testing.T) {
 		sh := backendmocks.NewMockProcessRunner(t)
 		expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"), helmStatusJSON, nil)
 		expectHelmCall(sh, helmStatusArgs("kind-test", "other-ns", "castai-dbo"), helmStatusJSON, nil)
 
-		k := &RealKubectl{shell: sh}
+		k := reachableKubectl(sh, "kind-test")
 		ctx := t.Context()
 
 		// The same coordinates hit the cache: two lookups, one helm run.
@@ -60,7 +70,7 @@ func TestHelmReleaseExists(t *testing.T) {
 		sh := backendmocks.NewMockProcessRunner(t)
 		expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"), "", ErrHelmReleaseNotFound)
 
-		k := &RealKubectl{shell: sh}
+		k := reachableKubectl(sh, "kind-test")
 		ctx := t.Context()
 
 		for range 2 {
@@ -74,7 +84,7 @@ func TestHelmReleaseExists(t *testing.T) {
 		sh := backendmocks.NewMockProcessRunner(t)
 		expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"), "not json", nil)
 
-		k := &RealKubectl{shell: sh}
+		k := reachableKubectl(sh, "kind-test")
 		exists, err := k.HelmReleaseExists(t.Context(), "kind-test", "castai-db-optimizer", "castai-dbo")
 		require.ErrorContains(t, err, "parse helm result")
 		require.False(t, exists)
@@ -85,7 +95,7 @@ func TestHelmReleaseExists(t *testing.T) {
 		expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"),
 			`{"name":"castai-dbo-2"}`, nil)
 
-		k := &RealKubectl{shell: sh}
+		k := reachableKubectl(sh, "kind-test")
 		exists, err := k.HelmReleaseExists(t.Context(), "kind-test", "castai-db-optimizer", "castai-dbo")
 		require.ErrorContains(t, err, `answered release "castai-dbo-2"`)
 		require.False(t, exists)
@@ -97,7 +107,7 @@ func TestHelmReleaseExists(t *testing.T) {
 		sh := backendmocks.NewMockProcessRunner(t)
 		expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"), "", errors.New(helmErr))
 
-		k := &RealKubectl{shell: sh}
+		k := reachableKubectl(sh, "kind-test")
 		ctx := t.Context()
 
 		for range 2 {
@@ -113,7 +123,7 @@ func TestHelmReleaseExists(t *testing.T) {
 			expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"), "", context.DeadlineExceeded)
 		}
 
-		k := &RealKubectl{shell: sh}
+		k := reachableKubectl(sh, "kind-test")
 
 		for range 2 {
 			exists, err := k.HelmReleaseExists(t.Context(), "kind-test", "castai-db-optimizer", "castai-dbo")
@@ -131,7 +141,7 @@ func TestHelmReleaseExists(t *testing.T) {
 			expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"), "", ctx.Err())
 		}
 
-		k := &RealKubectl{shell: sh}
+		k := reachableKubectl(sh, "kind-test")
 
 		for range 2 {
 			exists, err := k.HelmReleaseExists(ctx, "kind-test", "castai-db-optimizer", "castai-dbo")
@@ -141,45 +151,109 @@ func TestHelmReleaseExists(t *testing.T) {
 	})
 }
 
+// clusterCalls is every captured call that needs the cluster.
+var clusterCalls = map[string]func(ctx context.Context, k *RealKubectl) error{
+	"list secrets": func(ctx context.Context, k *RealKubectl) error {
+		_, err := k.ListSecrets(ctx, "kind-test", "castai-db-optimizer")
+
+		return err
+	},
+	"helm release exists": func(ctx context.Context, k *RealKubectl) error {
+		_, err := k.HelmReleaseExists(ctx, "kind-test", "castai-db-optimizer", "castai-dbo")
+
+		return err
+	},
+	"ensure secret": func(ctx context.Context, k *RealKubectl) error {
+		return k.EnsureSecret(ctx, "kind-test", "castai-db-optimizer", "creds", nil, io.Discard, false)
+	},
+}
+
 // An unreachable cluster keeps kubectl and helm waiting far longer than
-// the UI can; every captured cluster call must carry a deadline.
+// the UI can; the probe and every call after it must carry a deadline.
 func TestClusterCalls_AreBounded(t *testing.T) {
-	tests := map[string]func(ctx context.Context, k *RealKubectl){
-		"list secrets": func(ctx context.Context, k *RealKubectl) {
-			_, _ = k.ListSecrets(ctx, "kind-test", "castai-db-optimizer")
-		},
-		"helm release exists": func(ctx context.Context, k *RealKubectl) {
-			_, _ = k.HelmReleaseExists(ctx, "kind-test", "castai-db-optimizer", "castai-dbo")
-		},
-		"ensure secret": func(ctx context.Context, k *RealKubectl) {
-			_ = k.EnsureSecret(ctx, "kind-test", "castai-db-optimizer", "creds", nil, io.Discard, false)
-		},
+	requireBounded := func(t testing.TB, ctx context.Context, limit time.Duration) {
+		t.Helper()
+
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok, "cluster call ran without a deadline")
+		require.LessOrEqual(t, time.Until(deadline), limit)
 	}
-	for name, call := range tests {
+
+	for name, call := range clusterCalls {
 		t.Run(name, func(t *testing.T) {
 			sh := backendmocks.NewMockProcessRunner(t)
+			sh.EXPECT().Run(mock.Anything, "kubectl", []byte(nil), probeArgs("kind-test")).
+				RunAndReturn(func(ctx context.Context, _ string, _ []byte, _ []string) ([]byte, error) {
+					requireBounded(t, ctx, connectTimeout)
+
+					return nil, nil
+				}).
+				Once()
 			sh.EXPECT().Run(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 				RunAndReturn(func(ctx context.Context, _ string, _ []byte, _ []string) ([]byte, error) {
-					deadline, ok := ctx.Deadline()
-					require.True(t, ok, "cluster call ran without a deadline")
-					require.LessOrEqual(t, time.Until(deadline), clusterTimeout)
+					requireBounded(t, ctx, replyTimeout)
 
 					return nil, context.DeadlineExceeded
 				}).
 				Once()
 
-			call(t.Context(), &RealKubectl{shell: sh})
+			err := call(t.Context(), &RealKubectl{shell: sh})
+			require.ErrorIs(t, err, ErrClusterUnreachable)
+			require.ErrorContains(t, err, "no answer within 30s")
 		})
 	}
 }
 
-func TestListSecrets_TimeoutReportsClusterUnreachable(t *testing.T) {
-	sh := backendmocks.NewMockProcessRunner(t)
-	sh.EXPECT().Run(mock.Anything, "kubectl", mock.Anything, mock.Anything).
-		Once().
-		Return(nil, fmt.Errorf("kubectl get secret: %w", context.DeadlineExceeded))
+func TestReachable(t *testing.T) {
+	expectProbe := func(sh *backendmocks.MockProcessRunner, kubeContext string, err error) {
+		sh.EXPECT().Run(mock.Anything, "kubectl", []byte(nil), probeArgs(kubeContext)).Once().Return(nil, err)
+	}
 
-	_, err := (&RealKubectl{shell: sh}).ListSecrets(t.Context(), "kind-test", "castai-db-optimizer")
+	t.Run("an unreachable context is probed once and never called", func(t *testing.T) {
+		sh := backendmocks.NewMockProcessRunner(t)
+		expectProbe(sh, "kind-test", context.DeadlineExceeded)
 
-	require.EqualError(t, err, "kubernetes cluster unreachable: no answer within 10s")
+		k := &RealKubectl{shell: sh}
+		for _, call := range clusterCalls {
+			require.ErrorContains(t, call(t.Context(), k), "kubernetes cluster unreachable: no answer within 5s")
+		}
+	})
+
+	t.Run("a failed probe carries kubectl's reason", func(t *testing.T) {
+		sh := backendmocks.NewMockProcessRunner(t)
+		expectProbe(sh, "kind-test", errors.New("Unable to connect to the server: no such host"))
+
+		_, err := (&RealKubectl{shell: sh}).ListSecrets(t.Context(), "kind-test", "castai-db-optimizer")
+		require.ErrorIs(t, err, ErrClusterUnreachable)
+		require.EqualError(t, err, "kubernetes cluster unreachable: Unable to connect to the server: no such host")
+	})
+
+	t.Run("only the last context's verdict is kept", func(t *testing.T) {
+		sh := backendmocks.NewMockProcessRunner(t)
+		// Switching away and back probes kind-test again.
+		expectProbe(sh, "kind-test", context.DeadlineExceeded)
+		expectProbe(sh, "kind-other", context.DeadlineExceeded)
+		expectProbe(sh, "kind-test", context.DeadlineExceeded)
+
+		k := &RealKubectl{shell: sh}
+		for _, kubeContext := range []string{"kind-test", "kind-test", "kind-other", "kind-test"} {
+			_, err := k.ListSecrets(t.Context(), kubeContext, "castai-db-optimizer")
+			require.ErrorIs(t, err, ErrClusterUnreachable)
+		}
+	})
+
+	t.Run("a probe the caller cut short is no verdict", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		sh := backendmocks.NewMockProcessRunner(t)
+		expectProbe(sh, "kind-test", ctx.Err())
+		expectProbe(sh, "kind-test", ctx.Err())
+
+		k := &RealKubectl{shell: sh}
+		for range 2 {
+			_, err := k.ListSecrets(ctx, "kind-test", "castai-db-optimizer")
+			require.ErrorIs(t, err, context.Canceled)
+		}
+	})
 }

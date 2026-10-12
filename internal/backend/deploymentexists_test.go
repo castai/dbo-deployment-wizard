@@ -99,6 +99,7 @@ func TestSummarizeInstallationImpact(t *testing.T) {
 	tests := map[string]struct {
 		exists          bool
 		lookupErr       error
+		secretsErr      error
 		existingSecrets []string
 		agentCreds      api.Credentials
 		poolingCreds    api.Credentials
@@ -138,6 +139,11 @@ func TestSummarizeInstallationImpact(t *testing.T) {
 			want:      nil,
 			wantErr:   "context unreachable",
 		},
+		"secret listing failure returns the error": {
+			secretsErr: errors.New("secrets is forbidden"),
+			want:       nil,
+			wantErr:    "listing existing secrets: secrets is forbidden",
+		},
 		"existing secret references create nothing": {
 			agentCreds: api.Credentials{SecretName: "agent-secret"},
 			want: []string{
@@ -153,7 +159,7 @@ func TestSummarizeInstallationImpact(t *testing.T) {
 				Return(tt.exists, tt.lookupErr)
 			if tt.lookupErr == nil {
 				k.EXPECT().ListSecrets(mock.Anything, "kind-test", "castai-db-optimizer").
-					Return(tt.existingSecrets, nil)
+					Return(tt.existingSecrets, tt.secretsErr)
 			}
 
 			cfg := base

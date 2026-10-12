@@ -37,6 +37,11 @@ type RealKubectl struct {
 	releaseCacheMu sync.Mutex
 	releaseCache   map[releaseKey]releaseLookup
 
+	// probe is the reachability verdict for the context probed last;
+	// the lock is held across a probe so concurrent callers share it.
+	probeMu sync.Mutex
+	probe   *contextProbe
+
 	shell ProcessRunner
 }
 
@@ -57,6 +62,13 @@ type releaseKey struct {
 type releaseLookup struct {
 	exists bool
 	err    error
+}
+
+// contextProbe is one context's reachability verdict; err is why it
+// was deemed unreachable.
+type contextProbe struct {
+	kubeContext string
+	err         error
 }
 
 // ListKubeContexts returns every context name; an empty result is an
@@ -93,6 +105,10 @@ func (k *RealKubectl) CurrentKubeContext(ctx context.Context) (string, error) {
 // ListSecrets returns the names of every Secret in namespace on
 // kubeContext.
 func (k *RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace string) ([]string, error) {
+	if err := k.reachable(ctx, kubeContext); err != nil {
+		return nil, err
+	}
+
 	out, err := k.runKubectl(ctx, nil, []string{
 		"--context", kubeContext, "-n", namespace, //nolint:goconst
 		"get", "secret", "-o", "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}",
@@ -149,6 +165,10 @@ func (k *RealKubectl) lookupHelmRelease(ctx context.Context, kubeContext, namesp
 	type helmStatus struct {
 		Name string `json:"name"`
 	}
+	if err := k.reachable(ctx, kubeContext); err != nil {
+		return releaseLookup{err: err}
+	}
+
 	status, err := bounded(ctx, func(ctx context.Context) (helmStatus, error) {
 		return runHelmJSON[helmStatus](ctx, k.shell, []string{
 			"status", releaseName, "-n", namespace, "--kube-context", kubeContext, //nolint:goconst
@@ -169,23 +189,60 @@ func (k *RealKubectl) lookupHelmRelease(ctx context.Context, kubeContext, namesp
 	return releaseLookup{exists: true}
 }
 
-// clusterTimeout bounds one captured kubectl or helm call: against an
-// unreachable cluster helm waits out a 30s dial and kubectl retries it
-// five times.
-const clusterTimeout = 10 * time.Second
+const (
+	// connectTimeout bounds the reachability probe: left alone, helm
+	// waits out a 30s dial and kubectl retries it five times.
+	connectTimeout = 5 * time.Second
+	// replyTimeout bounds one captured kubectl or helm call against a
+	// cluster the probe found reachable.
+	replyTimeout = 30 * time.Second
+)
 
-// ErrClusterUnreachable is a cluster call that outran clusterTimeout.
+// ErrClusterUnreachable is a context that failed its reachability
+// probe, or a cluster call that outran replyTimeout.
 var ErrClusterUnreachable = errors.New("kubernetes cluster unreachable")
 
-// bounded runs one cluster call under clusterTimeout and names an
+// reachable probes kubeContext with a single request and remembers the
+// verdict until another context is asked about: an unreachable cluster
+// costs one connectTimeout, not one per call, and is not retried until
+// the user picks a different context.
+func (k *RealKubectl) reachable(ctx context.Context, kubeContext string) error {
+	k.probeMu.Lock()
+	defer k.probeMu.Unlock()
+
+	if k.probe != nil && k.probe.kubeContext == kubeContext {
+		return k.probe.err
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+
+	// A raw request skips API discovery and its retries.
+	_, err := k.shell.Run(probeCtx, "kubectl", nil, []string{"--context", kubeContext, "get", "--raw", "/version"})
+	if ctx.Err() != nil {
+		// Cut short by the caller: no verdict.
+		return ctx.Err()
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		err = fmt.Errorf("%w: no answer within %s", ErrClusterUnreachable, connectTimeout)
+	case err != nil:
+		err = fmt.Errorf("%w: %w", ErrClusterUnreachable, err)
+	}
+	k.probe = &contextProbe{kubeContext: kubeContext, err: err}
+
+	return err
+}
+
+// bounded runs one cluster call under replyTimeout and names an
 // expired deadline for what it is.
 func bounded[T any](ctx context.Context, call func(ctx context.Context) (T, error)) (T, error) {
-	ctx, cancel := context.WithTimeout(ctx, clusterTimeout)
+	ctx, cancel := context.WithTimeout(ctx, replyTimeout)
 	defer cancel()
 
 	result, err := call(ctx)
 	if errors.Is(err, context.DeadlineExceeded) {
-		return result, fmt.Errorf("%w: no answer within %s", ErrClusterUnreachable, clusterTimeout)
+		return result, fmt.Errorf("%w: no answer within %s", ErrClusterUnreachable, replyTimeout)
 	}
 
 	return result, err
@@ -222,6 +279,10 @@ func (k *RealKubectl) EnsureSecret(ctx context.Context, kubeContext, namespace, 
 		fmt.Fprintf(stdout, "kubectl %s  # %s\n", shellescape.QuoteCommand(argv), name)
 
 		return nil
+	}
+
+	if err := k.reachable(ctx, kubeContext); err != nil {
+		return err
 	}
 
 	encoded := make(map[string]string, len(data))
