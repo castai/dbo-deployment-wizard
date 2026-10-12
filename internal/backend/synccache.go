@@ -4,13 +4,13 @@ import "sync"
 
 // syncCache is a map safe for concurrent use; the zero value is ready.
 type syncCache[K comparable, V any] struct {
-	mu    sync.Mutex
+	mu    sync.RWMutex
 	items map[K]V
 }
 
 func (c *syncCache[K, V]) get(key K) (V, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
 	value, ok := c.items[key]
 
