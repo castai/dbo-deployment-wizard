@@ -17,9 +17,41 @@ env:
   GOLANGCI_LINT_VERSION: v2.14.0
 
 jobs:
+  # Test and Lint are required checks: gate them per job (a skipped job passes),
+  # never with workflow-level `paths`, which would leave them pending forever.
+  changes:
+    name: Changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      - uses: dorny/paths-filter@v4.0.3
+        id: filter
+        with:
+          # Only inputs of `make test` / lint; a new kind of input (e.g. an
+          # embedded non-Go file outside testdata) must be added here.
+          filters: |
+            src:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - '**/testdata/**'
+              - 'Makefile'
+              - '.golangci.yml'
+              - '.mockery.yaml'
+              - '.github/workflows/ci.yaml'
+
   test:
     name: Test
-    runs-on: ubuntu-latest
+    needs: changes
+    # Runs unless the filter explicitly said "no source changes": pushes to
+    # main (filter skipped) and a failed filter both fall through to a full run.
+    if: ${{ !cancelled() && needs.changes.outputs.src != 'false' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -35,7 +67,9 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.src != 'false' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
