@@ -50,6 +50,20 @@ components, database credentials), shows a review summary, and runs
   and other test variants can share them.
 
 - Mocks are generated with mockery from `.mockery.yaml` and live in
-  `mocks/`; always regenerate with `make gen`.
+  `mocks/`; always regenerate with `make gen`, never edit them by hand.
 - Run tests with `make test`; lint with `make lint` (or `make fix` to
   auto-fix).
+- Work is not done until both `make test` and `make lint` pass.
+
+## Commits
+
+- Never add agent `Co-Authored-By` trailers (or any other agent
+  attribution) to commit messages or pull request descriptions.
+- Never commit directly to `main` — always work on a branch.
+- Never push, force-push, or rewrite already-pushed history unless
+  explicitly asked.
+
+## Scope
+
+- Work strictly within this repository — never read or modify files
+  in other repositories.
