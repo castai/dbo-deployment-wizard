@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -99,6 +100,24 @@ func TestHelmReleaseExists(t *testing.T) {
 		for range 2 {
 			exists, err := k.HelmReleaseExists(ctx, "kind-test", "castai-db-optimizer", "castai-dbo")
 			require.ErrorContains(t, err, helmErr)
+			require.False(t, exists)
+		}
+	})
+
+	t.Run("retries a lookup its context cut short", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		sh := backendmocks.NewMockProcessRunner(t)
+		for range 2 {
+			expectHelmCall(sh, helmStatusArgs("kind-test", "castai-db-optimizer", "castai-dbo"), "", ctx.Err())
+		}
+
+		k := &RealKubectl{shell: sh}
+
+		for range 2 {
+			exists, err := k.HelmReleaseExists(ctx, "kind-test", "castai-db-optimizer", "castai-dbo")
+			require.ErrorIs(t, err, context.Canceled)
 			require.False(t, exists)
 		}
 	})

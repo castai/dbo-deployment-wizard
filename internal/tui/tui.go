@@ -153,7 +153,7 @@ func (m *Model) setCurrentScreen(s screen) {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return repaintIn()
+	return tea.Batch(repaintIn(), m.review.load())
 }
 
 //nolint:ireturn // bubbletea v2 Model.Update mandates a tea.Model return.
@@ -168,6 +168,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_, cmd = m.handleKey(typed)
 	case confirmSummaryMsg:
 		m.confirm.update(typed)
+	case reviewTitleMsg:
+		m.review.setTitle(typed)
 	case tea.BackgroundColorMsg:
 		_, _ = forwardToForm(&m.kubeContextForm, typed)
 		_, _ = forwardToForm(&m.poolingCredsForm, typed)
@@ -187,6 +189,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.state != before {
 		cmd = tea.Batch(cmd, tea.ClearScreen)
+		// The edit may have changed the release coordinates.
+		if m.state == screenReview {
+			cmd = tea.Batch(cmd, m.review.load())
+		}
 	}
 
 	return m, cmd

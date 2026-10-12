@@ -1,8 +1,11 @@
 package backend
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -39,6 +42,11 @@ func TestDeploymentExists(t *testing.T) {
 			want:    false,
 			wantErr: "context unreachable",
 		},
+		"timed out lookup reports the cluster unreachable": {
+			err:     fmt.Errorf("helm status: %w", context.DeadlineExceeded),
+			want:    false,
+			wantErr: `kubernetes cluster unreachable: context "kind-test" did not respond within 10s`,
+		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -57,6 +65,44 @@ func TestDeploymentExists(t *testing.T) {
 				return
 			}
 			r.EqualError(err, tt.wantErr)
+		})
+	}
+}
+
+// An unreachable cluster keeps kubectl and helm waiting far longer than
+// the UI can; every lookup must carry a deadline.
+func TestClusterLookups_AreBounded(t *testing.T) {
+	requireBounded := func(t testing.TB, ctx context.Context) {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok, "cluster lookup ran without a deadline")
+		require.LessOrEqual(t, time.Until(deadline), clusterQueryTimeout)
+	}
+
+	tests := map[string]func(w *Wizard){
+		"deployment exists": func(w *Wizard) { _, _ = w.DeploymentExists() },
+		"secrets":           func(w *Wizard) { _ = w.Secrets() },
+		"installation impact": func(w *Wizard) {
+			_, _ = w.SummarizeInstallationImpact()
+		},
+	}
+	for name, lookup := range tests {
+		t.Run(name, func(t *testing.T) {
+			k := backendmocks.NewMockKubectl(t)
+			k.EXPECT().HelmReleaseExists(mock.Anything, "kind-test", "castai-db-optimizer", "castai-dbo").
+				RunAndReturn(func(ctx context.Context, _, _, _ string) (bool, error) {
+					requireBounded(t, ctx)
+
+					return false, nil
+				}).Maybe()
+			k.EXPECT().ListSecrets(mock.Anything, "kind-test", "castai-db-optimizer").
+				RunAndReturn(func(ctx context.Context, _, _ string) ([]string, error) {
+					requireBounded(t, ctx)
+
+					return nil, nil
+				}).Maybe()
+
+			lookup(newReleaseLookupWizard(t, k))
+			require.NotEmpty(t, k.Calls)
 		})
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -29,6 +30,10 @@ type RealProcessRunner struct {
 	SimulateSlowNetwork bool
 }
 
+// killWaitDelay caps the wait for a killed program's output pipes: a
+// child it left behind (kubectl's exec credential plugin) holds them open.
+const killWaitDelay = time.Second
+
 func (s *RealProcessRunner) Run(ctx context.Context, program string, stdin []byte, args []string) ([]byte, error) {
 	if s.SimulateSlowNetwork {
 		if err := sleepCtx(ctx, simulateSlowNetworkDelay); err != nil {
@@ -37,6 +42,7 @@ func (s *RealProcessRunner) Run(ctx context.Context, program string, stdin []byt
 	}
 
 	cmd := exec.CommandContext(ctx, program, args...)
+	cmd.WaitDelay = killWaitDelay
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}

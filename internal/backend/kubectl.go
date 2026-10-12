@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"al.essio.dev/pkg/shellescape"
@@ -31,8 +32,10 @@ type Kubectl interface {
 // UI testing aid.
 type RealKubectl struct {
 	// releaseCache memoizes HelmReleaseExists results by release
-	// coordinates; the UI re-checks on every review render.
-	releaseCache map[releaseKey]releaseLookup
+	// coordinates; the UI re-checks on every review and confirm entry,
+	// from background commands — hence the lock.
+	releaseCacheMu sync.Mutex
+	releaseCache   map[releaseKey]releaseLookup
 
 	shell ProcessRunner
 }
@@ -113,14 +116,25 @@ func (k *RealKubectl) ListSecrets(ctx context.Context, kubeContext, namespace st
 // while its not-found line, which a missing namespace also answers
 // with, reads as a new installation. Results are memoized by release
 // coordinates — failures included, so a broken lookup doesn't
-// re-shell-out on every render.
+// re-shell-out on every entry — except a lookup the caller's context
+// cut short, which says nothing about the release and is retried.
 func (k *RealKubectl) HelmReleaseExists(ctx context.Context, kubeContext, namespace, releaseName string) (bool, error) {
 	key := releaseKey{kubeContext: kubeContext, namespace: namespace, releaseName: releaseName}
-	if cached, ok := k.releaseCache[key]; ok {
+
+	k.releaseCacheMu.Lock()
+	cached, ok := k.releaseCache[key]
+	k.releaseCacheMu.Unlock()
+	if ok {
 		return cached.exists, cached.err
 	}
 
 	result := k.lookupHelmRelease(ctx, kubeContext, namespace, releaseName)
+	if ctx.Err() != nil {
+		return result.exists, result.err
+	}
+
+	k.releaseCacheMu.Lock()
+	defer k.releaseCacheMu.Unlock()
 	if k.releaseCache == nil {
 		k.releaseCache = map[releaseKey]releaseLookup{}
 	}
