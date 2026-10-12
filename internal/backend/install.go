@@ -60,10 +60,10 @@ func newHelmValues(c Config) helmValues {
 	var v helmValues
 	v.DBAgent.Enabled = c.HasComponent(api.ComponentDBAgent)
 	v.DBAgent.APIURL = c.APIURL
-	v.DBAgent.Database.CredentialsSecretRef = c.AgentCreds.SecretName
+	v.DBAgent.Database.CredentialsSecretRef = c.agentCreds().SecretName
 	v.DBProxy.Enabled = c.HasComponent(api.ComponentDBProxy)
 	v.DBProxy.Pooling.Enabled = c.HasComponent(api.ComponentPooling)
-	v.DBProxy.Pooling.ProxySQL.UserSecretRef = c.PoolingCreds.SecretName
+	v.DBProxy.Pooling.ProxySQL.UserSecretRef = c.poolingCreds().SecretName
 
 	return v
 }

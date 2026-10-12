@@ -138,10 +138,10 @@ func (w *Wizard) SummarizeInstallationImpact() ([]string, error) {
 		deployment + " " + w.cfg.Namespace + "/" + w.cfg.ReleaseName,
 		secretLine("api key", w.cfg.ReleaseName+"-api-key", existingSecrets),
 	}
-	if w.cfg.AgentCreds.Username != "" && w.cfg.AgentCreds.Password != "" {
+	if agent := w.cfg.agentCreds(); agent.Username != "" && agent.Password != "" {
 		lines = append(lines, secretLine("db agent", w.secretName("agent"), existingSecrets))
 	}
-	if w.cfg.PoolingCreds.Username != "" && w.cfg.PoolingCreds.Password != "" {
+	if pooling := w.cfg.poolingCreds(); pooling.Username != "" && pooling.Password != "" {
 		lines = append(lines, secretLine("pooling", w.secretName("pooling"), existingSecrets))
 	}
 
@@ -205,6 +205,7 @@ func (w *Wizard) Validate() error { return w.cfg.validate() }
 func (w *Wizard) Install(stdout io.Writer) error {
 	fmt.Fprintf(stdout, "\n\n\nApplying...%s\n", lo.Ternary(w.cfg.DryRun, "(dry run mode)", ""))
 	cfg := w.cfg
+	cfg.AgentCreds, cfg.PoolingCreds = cfg.agentCreds(), cfg.poolingCreds()
 
 	// The secret-write log names creating vs updating; the dry run
 	// prints the apply commands instead and skips the discovery call.

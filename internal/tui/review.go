@@ -127,18 +127,16 @@ func credsSummary(c api.Credentials) string {
 }
 
 // credsSub renders the credentials row's sub line: the source
-// summary, or — when the credentials are a prerequisite and missing —
-// the "required" marker (second return reports the warning).
-func credsSub(c api.Credentials, required bool) (string, bool) {
+// summary, or — when the credentials are missing — the "required"
+// marker (second return reports the warning).
+func credsSub(c api.Credentials) (string, bool) {
 	switch {
 	case c.SecretName != "":
 		return "Selected secret: " + c.SecretName, false
 	case c.Username != "" && c.Password != "":
 		return "Username: " + c.Username + ", password: " + maskPassword(c.Password), false
-	case required:
-		return requiredSub, true
 	default:
-		return "", false
+		return requiredSub, true
 	}
 }
 
@@ -214,22 +212,28 @@ func reviewItems(b api.Backend, reviewErr string) []list.Item {
 	pooling := b.PoolingCredentials()
 	latestVersion := b.LatestChartVersion()
 
-	// The agent credentials are only a prerequisite when db-agent is
-	// enabled; pooling's row exists only when pooling is.
-	agentRow := reviewItem{
-		label:  "Agent credentials:",
-		value:  credsSummary(agentCreds),
-		target: screenAgentCreds,
-	}
-	agentRow.sub, agentRow.subWarn = credsSub(agentCreds, slices.Contains(b.Components(), api.ComponentDBAgent))
-
 	rows := []reviewItem{
 		{label: "Kubectl context:", value: emptyDash(b.KubeContext()), target: screenKubeContext},
 		{label: "Target namespace:", value: emptyDash(b.Namespace()), target: screenNamespace},
 		{label: "Chart version:", value: chartVersionDisplay(b.ChartVersion(), latestVersion), target: screenChartVersion},
-		agentRow,
-		{label: "Components to install:", value: emptyDash(strings.Join(b.Components(), ", ")), target: screenComponents},
 	}
+
+	// Each credentials row exists only while its component is enabled.
+	if slices.Contains(b.Components(), api.ComponentDBAgent) {
+		row := reviewItem{
+			label:  "Agent credentials:",
+			value:  credsSummary(agentCreds),
+			target: screenAgentCreds,
+		}
+		row.sub, row.subWarn = credsSub(agentCreds)
+		rows = append(rows, row)
+	}
+
+	rows = append(rows, reviewItem{
+		label:  "Components to install:",
+		value:  emptyDash(strings.Join(b.Components(), ", ")),
+		target: screenComponents,
+	})
 
 	if slices.Contains(b.Components(), api.ComponentPooling) {
 		row := reviewItem{
@@ -237,7 +241,7 @@ func reviewItems(b api.Backend, reviewErr string) []list.Item {
 			value:  credsSummary(pooling),
 			target: screenPoolingCreds,
 		}
-		row.sub, row.subWarn = credsSub(pooling, true)
+		row.sub, row.subWarn = credsSub(pooling)
 		rows = append(rows, row)
 	}
 
@@ -310,6 +314,8 @@ func newReviewModel(b api.Backend, styles *huh.Styles, isDark bool) *reviewModel
 // the height is 2 rows per item (with slack for the delegates' sub
 // lines) and never below 14.
 func (r *reviewModel) sync() {
+	selected, hadSelection := r.list.SelectedItem().(reviewItem)
+
 	items := reviewItems(r.backend, r.reviewError)
 	r.list.SetItems(items)
 
@@ -318,6 +324,17 @@ func (r *reviewModel) sync() {
 		h = 14
 	}
 	r.list.SetHeight(h)
+
+	// The list keeps the cursor's index, but the agent row above
+	// "Components" comes and goes — follow the row instead.
+	_, i, found := lo.FindIndexOf(items, func(it list.Item) bool {
+		ri, ok := it.(reviewItem)
+
+		return ok && ri.target == selected.target && ri.action == selected.action
+	})
+	if hadSelection && found {
+		r.list.Select(i)
+	}
 }
 
 // backToReview resets the rows for re-entry from a sub-screen; the
