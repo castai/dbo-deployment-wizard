@@ -101,12 +101,14 @@ func TestSummarizeInstallationImpact(t *testing.T) {
 		lookupErr       error
 		secretsErr      error
 		existingSecrets []string
+		components      []string
 		agentCreds      api.Credentials
 		poolingCreds    api.Credentials
 		want            []string
 		wantErr         string
 	}{
 		"new installation creates its secrets": {
+			components:   api.AllComponents,
 			agentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
 			poolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
 			want: []string{
@@ -117,6 +119,7 @@ func TestSummarizeInstallationImpact(t *testing.T) {
 			},
 		},
 		"existing secrets update": {
+			components:      api.AllComponents,
 			agentCreds:      api.Credentials{Username: "agent", Password: "agentpass"},
 			poolingCreds:    api.Credentials{Username: "pooler", Password: "poolpass"},
 			existingSecrets: []string{"castai-dbo-api-key", "castai-dbo-agent-credentials"},
@@ -144,7 +147,17 @@ func TestSummarizeInstallationImpact(t *testing.T) {
 			want:       nil,
 			wantErr:    "listing existing secrets: secrets is forbidden",
 		},
+		"disabled components create no secrets": {
+			components:   []string{api.ComponentDBProxy},
+			agentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
+			poolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
+			want: []string{
+				"New Helm deployment to be created: castai-db-optimizer/castai-dbo",
+				"New api key secret will be created: castai-dbo-api-key",
+			},
+		},
 		"existing secret references create nothing": {
+			components: api.AllComponents,
 			agentCreds: api.Credentials{SecretName: "agent-secret"},
 			want: []string{
 				"New Helm deployment to be created: castai-db-optimizer/castai-dbo",
@@ -163,6 +176,7 @@ func TestSummarizeInstallationImpact(t *testing.T) {
 			}
 
 			cfg := base
+			cfg.Components = tt.components
 			cfg.AgentCreds = tt.agentCreds
 			cfg.PoolingCreds = tt.poolingCreds
 			w := &Wizard{ctx: t.Context(), k: k, cfg: cfg}

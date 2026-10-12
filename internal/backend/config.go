@@ -108,6 +108,25 @@ func (c *Config) reconcilePoolingCreds() {
 	}
 }
 
+// agentCreds returns the agent credentials in effect: none while
+// db-agent is disabled, so stale ones create and reference no Secret.
+// poolingCreds does the same for pooling.
+func (c *Config) agentCreds() api.Credentials {
+	if !c.HasComponent(api.ComponentDBAgent) {
+		return api.Credentials{}
+	}
+
+	return c.AgentCreds
+}
+
+func (c *Config) poolingCreds() api.Credentials {
+	if !c.HasComponent(api.ComponentPooling) {
+		return api.Credentials{}
+	}
+
+	return c.PoolingCreds
+}
+
 // SetComponentEnabled toggles a single component; validity is
 // enforced by SetComponents.
 func (c *Config) SetComponentEnabled(name string, enabled bool) error {

@@ -152,6 +152,39 @@ func TestWizardDryRun_PrintsSecretCommands(t *testing.T) {
 	r.Contains(out.String(), "# Dry run: not executing. Values that would be applied:")
 }
 
+// Credentials entered for a component that was later deselected must
+// not reach the cluster: the strict mock fails on any Secret but the
+// API key's.
+func TestWizardInstall_SkipsDisabledComponentsSecrets(t *testing.T) {
+	r := require.New(t)
+
+	cfg := Config{
+		ReleaseName:  "castai-dbo",
+		ChartName:    "castai-dbo",
+		Namespace:    "castai-dbo",
+		KubeContext:  "kind-test",
+		ChartVersion: "1.4.2",
+		Components:   []string{api.ComponentDBProxy},
+		AgentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
+		PoolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
+		APIURL:       "https://api.cast.ai",
+		APISecret:    "sec",
+		DryRun:       true,
+	}
+
+	k := backendmocks.NewMockKubectl(t)
+	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-api-key",
+		map[string]string{"API_KEY": "sec"}, mock.Anything, true).Return(nil)
+
+	w := &Wizard{ctx: t.Context(), k: k, shell: backendmocks.NewMockProcessRunner(t), cfg: cfg}
+	var out bytes.Buffer
+	r.NoError(w.Install(&out))
+
+	r.NotContains(out.String(), "credentials")
+	r.NotContains(out.String(), "SecretRef: castai-dbo-agent")
+	r.NotContains(out.String(), "userSecretRef")
+}
+
 // TestNewHelmValues_Cartesian asserts the exact values the renderer
 // emits across the (component-set × credentials) combinations the
 // wizard supports.
@@ -172,10 +205,22 @@ func TestNewHelmValues_Cartesian(t *testing.T) {
 		{
 			name: "agent secret ref",
 			config: Config{
+				Components: []string{api.ComponentDBAgent},
 				AgentCreds: api.Credentials{SecretName: "my-agent-secret"},
 			},
 			want: helmValues{
-				DBAgent: dbAgentValues{Database: dbAgentDatabase{CredentialsSecretRef: "my-agent-secret"}},
+				DBAgent: dbAgentValues{Enabled: true, Database: dbAgentDatabase{CredentialsSecretRef: "my-agent-secret"}},
+			},
+		},
+		{
+			name: "disabled components' secret refs are left out",
+			config: Config{
+				Components:   []string{api.ComponentDBProxy},
+				AgentCreds:   api.Credentials{SecretName: "my-agent-secret"},
+				PoolingCreds: api.Credentials{SecretName: "pooling-secret"},
+			},
+			want: helmValues{
+				DBProxy: dbProxyValues{Enabled: true},
 			},
 		},
 		{
