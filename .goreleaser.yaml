@@ -29,3 +29,20 @@ release:
   mode: keep-existing
   extra_files:
     - glob: ./dist/wrapper_cmd.sh
+
+changelog:
+  # Used only when the release was published with an empty description.
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^ci:'
+      - '^chore:'
+      - '^test:'
+  groups:
+    - title: Features
+      regexp: '^feat'
+    - title: Fixes
+      regexp: '^fix'
+    - title: Other changes
+      order: 999
