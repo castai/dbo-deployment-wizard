@@ -14,7 +14,7 @@ func newNamespaceForm(b api.Backend) formSpec {
 			huh.NewGroup(
 				huh.NewInput().
 					Title("K8s Namespace").
-					Description("Components will be installed to this Kubernetes namespace. Will be created if missing.").
+					Description("Features will be installed to this Kubernetes namespace. Will be created if missing.").
 					Value(&namespace),
 			),
 		),

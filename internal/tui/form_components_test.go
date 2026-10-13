@@ -80,7 +80,7 @@ func TestComponentsShownByDisplayName(t *testing.T) {
 		"all selected": {
 			components: api.AllComponents,
 			wantReview: []string{
-				"Components: Performance Advisor, Database Proxy, Connection Pooling",
+				"Features: Performance Advisor, Database Proxy, Connection Pooling",
 				"Performance Advisor credentials:",
 				"Connection Pooling credentials:",
 			},
@@ -88,7 +88,7 @@ func TestComponentsShownByDisplayName(t *testing.T) {
 		},
 		"none selected is marked required": {
 			components: nil,
-			wantReview: []string{"Components: " + unsetPlaceholder, requiredSub},
+			wantReview: []string{"Features: " + unsetPlaceholder, requiredSub},
 			wantForm:   []string{"Performance Advisor"},
 		},
 	}
@@ -104,9 +104,9 @@ func TestComponentsShownByDisplayName(t *testing.T) {
 				r.Contains(review, want)
 			}
 			r.NotContains(review, "db-agent")
-			r.Less(strings.Index(review, "Chart version:"), strings.Index(review, "Components:"))
+			r.Less(strings.Index(review, "Chart version:"), strings.Index(review, "Features:"))
 			if len(tt.components) > 0 {
-				r.Less(strings.Index(review, "Components:"), strings.Index(review, "Performance Advisor credentials:"))
+				r.Less(strings.Index(review, "Features:"), strings.Index(review, "Performance Advisor credentials:"))
 				r.Less(strings.Index(review, "Performance Advisor credentials:"), strings.Index(review, "Connection Pooling credentials:"))
 			}
 

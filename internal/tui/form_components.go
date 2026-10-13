@@ -44,13 +44,13 @@ func componentsForm(selected *[]string) *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
-				Title("Components").
-				Description("Components to install; " + componentName(api.ComponentPooling) +
+				Title("Features").
+				Description("Features to install; " + componentName(api.ComponentPooling) +
 					" requires " + componentName(api.ComponentDBProxy) + ".").
 				Options(options...).
 				Value(selected).
 				Height(len(api.AllComponents) + 3),
-		).Title("Components"),
+		).Title("Features"),
 	)
 }
 

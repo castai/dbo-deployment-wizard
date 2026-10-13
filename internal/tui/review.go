@@ -250,7 +250,7 @@ func reviewItems(b api.Backend, s rowState) []list.Item {
 	}
 
 	components := reviewItem{
-		label:  "Components:",
+		label:  "Features:",
 		value:  emptyDash(componentNameList(b.Components())),
 		target: screenComponents,
 	}
