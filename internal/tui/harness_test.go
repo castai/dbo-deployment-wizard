@@ -24,14 +24,16 @@ type fakeBackend struct {
 	poolingCreds api.Credentials
 	components   []string
 
-	kubeContexts []string
-	versions     []api.HelmChartVersion
-	secrets      []string
-	secretsErr   error
-	exists       bool
-	existsErr    error
-	summary      []string
-	summaryErr   error
+	kubeContexts    []string
+	kubeContextsErr error
+	versions        []api.HelmChartVersion
+	versionsErr     error
+	secrets         []string
+	secretsErr      error
+	exists          bool
+	existsErr       error
+	summary         []string
+	summaryErr      error
 
 	setComponentsErr error
 	validateErr      error
@@ -59,9 +61,11 @@ func (f *fakeBackend) ReleaseName() string                 { return "castai-dbo"
 func (f *fakeBackend) AgentCredentials() api.Credentials   { return f.agentCreds }
 func (f *fakeBackend) PoolingCredentials() api.Credentials { return f.poolingCreds }
 func (f *fakeBackend) Components() []string                { return f.components }
-func (f *fakeBackend) KubeContexts() ([]string, error)     { return f.kubeContexts, nil }
+func (f *fakeBackend) KubeContexts() ([]string, error)     { return f.kubeContexts, f.kubeContextsErr }
 
-func (f *fakeBackend) ChartVersions() ([]api.HelmChartVersion, error) { return f.versions, nil }
+func (f *fakeBackend) ChartVersions() ([]api.HelmChartVersion, error) {
+	return f.versions, f.versionsErr
+}
 
 func (f *fakeBackend) LatestChartVersion() string { return f.versions[0].Number }
 
