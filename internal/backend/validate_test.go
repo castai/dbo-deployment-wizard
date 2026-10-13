@@ -52,6 +52,10 @@ func TestConfigValidate(t *testing.T) {
 			mutate:  func(c *Config) { c.ChartVersion = "" },
 			wantErr: "chart version is required",
 		},
+		"no components": {
+			mutate:  func(c *Config) { require.NoError(t, c.SetComponents(nil)) },
+			wantErr: "at least one component is required",
+		},
 		"missing agent credentials": {
 			mutate:  func(c *Config) { c.AgentCreds = api.Credentials{} },
 			wantErr: "agent credentials are required",
