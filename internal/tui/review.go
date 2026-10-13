@@ -281,7 +281,6 @@ func newReviewModel(b api.Backend, styles *huh.Styles, isDark bool) *reviewModel
 		list:    newItemList(styles, isDark),
 		release: newAsync[bool](styles),
 	}
-	r.release.busy = true
 	r.sync()
 
 	// Start on the Continue action
