@@ -29,8 +29,8 @@ type Model struct {
 	// committed configuration.
 	backend api.Backend
 
-	// theme is shared with the embedded forms via WithTheme; styles is
-	// its resolution for the terminal background.
+	// styles is the Charm theme resolved for the terminal background;
+	// theme hands the forms those styles whatever background they think.
 	theme  huh.Theme
 	styles *huh.Styles
 
@@ -65,8 +65,10 @@ func newModel(b api.Backend) *Model {
 func newModelWithBackground(b api.Backend, isDark bool) *Model {
 	m := &Model{backend: b}
 
-	m.theme = huh.ThemeFunc(huh.ThemeCharm)
-	m.styles = m.theme.Theme(isDark)
+	m.styles = huh.ThemeCharm(isDark)
+	// huh resolves the background only from tea.BackgroundColorMsg, which
+	// arrives once at startup and never reaches forms rebuilt later.
+	m.theme = huh.ThemeFunc(func(bool) *huh.Styles { return m.styles })
 
 	m.review = newReviewModel(b, m.styles, isDark)
 	m.active = m.review
