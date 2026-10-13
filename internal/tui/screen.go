@@ -3,6 +3,7 @@ package tui
 import (
 	"sync/atomic"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 )
@@ -41,6 +42,9 @@ func navigate(to screenID) tea.Cmd {
 // abortMsg asks the root to quit without installing.
 type abortMsg struct{}
 
+// formDoneMsg is a form's SubmitCmd: the adapter commits the draft.
+type formDoneMsg struct{}
+
 // applyMsg asks the root to quit and run the install.
 type applyMsg struct{}
 
@@ -60,11 +64,12 @@ type formSpec struct {
 	rebuild func() *huh.Form
 }
 
-// formScreen adapts a huh form to a screen: it commits on completion
-// and returns to review either way.
+// formScreen adapts a huh form to a screen: huh reports completion and
+// cancel through SubmitCmd/CancelCmd; completion commits the draft.
 type formScreen struct {
 	formSpec
-	theme huh.Theme
+	theme  huh.Theme
+	keymap *huh.KeyMap
 }
 
 func newFormScreen(theme huh.Theme, spec formSpec) *formScreen {
@@ -75,7 +80,11 @@ func newFormScreen(theme huh.Theme, spec formSpec) *formScreen {
 }
 
 func (s *formScreen) adopt(f *huh.Form) {
-	s.form = f.WithTheme(s.theme)
+	s.keymap = huh.NewDefaultKeyMap()
+	s.keymap.Quit = key.NewBinding(key.WithKeys(append(s.keymap.Quit.Keys(), "esc")...))
+	s.form = f.WithTheme(s.theme).WithKeyMap(s.keymap)
+	s.form.SubmitCmd = send(formDoneMsg{})
+	s.form.CancelCmd = navigate(screenReview)
 }
 
 func (s *formScreen) Init() tea.Cmd {
@@ -84,21 +93,24 @@ func (s *formScreen) Init() tea.Cmd {
 
 //nolint:ireturn // screen.Update returns the next screen.
 func (s *formScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
-	key, isKey := msg.(tea.KeyPressMsg)
-	if isKey && isEsc(key) {
+	if _, ok := msg.(formDoneMsg); ok {
+		_ = s.commit()
+
 		return s, navigate(screenReview)
+	}
+
+	keyMsg, isKey := msg.(tea.KeyPressMsg)
+	if isKey {
+		// huh matches Quit before the focused field sees the key, so
+		// Esc would cancel even while a select uses it for its filter.
+		s.keymap.Quit.SetEnabled(!fieldClaimsKey(s.form.GetFocusedField(), keyMsg))
 	}
 
 	model, cmd := s.form.Update(msg)
 	if f, ok := model.(*huh.Form); ok {
 		s.form = f
 	}
-	if s.form.State == huh.StateCompleted {
-		_ = s.commit()
-
-		return s, navigate(screenReview)
-	}
-	if isKey && s.rebuild != nil {
+	if isKey && s.rebuild != nil && s.form.State == huh.StateNormal {
 		if f := s.rebuild(); f != nil {
 			s.adopt(f)
 
@@ -107,6 +119,12 @@ func (s *formScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
 	}
 
 	return s, cmd
+}
+
+// fieldClaimsKey reports whether the field has an enabled binding of
+// its own for msg, e.g. a select's Esc to set or clear its filter.
+func fieldClaimsKey(f huh.Field, msg tea.KeyPressMsg) bool {
+	return f != nil && key.Matches(msg, f.KeyBinds()...)
 }
 
 // View renders the form directly; huh draws its own title and help
