@@ -11,9 +11,9 @@ import (
 	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
 
-// Config is every user-supplied deployment parameter, from the CLI's
-// flags to the TUI's commits; the helm install generator is one of
-// its consumers.
+// Config is every deployment parameter, from the CLI's flags to the
+// Backend commands; the helm install generator is one of its
+// consumers.
 type Config struct {
 	ReleaseName  string
 	ChartName    string
@@ -40,12 +40,13 @@ type Config struct {
 	DryRun bool
 
 	// SimulateSlowNetwork delays every networked call by a fixed 2s —
-	// a local UI-testing aid, not a deployment parameter.
+	// a local testing aid, not a deployment parameter.
 	SimulateSlowNetwork bool
 }
 
 // Static defaults; the discovery-based fields (KubeContext,
-// ChartVersion) are filled by NewWizard.
+// ChartVersion) are left for the caller to fill from
+// CurrentKubeContext and LatestChartVersion.
 const (
 	defaultAPIBaseURL  = "https://api.cast.ai"
 	defaultChartName   = "castai-dbo"
@@ -155,6 +156,12 @@ func (c *Config) validate() error {
 	}
 	if c.ChartName == "" {
 		errs = append(errs, errors.New("chart name is required"))
+	}
+	if c.KubeContext == "" {
+		errs = append(errs, errors.New("kubectl context is required"))
+	}
+	if c.ChartVersion == "" {
+		errs = append(errs, errors.New("chart version is required"))
 	}
 	if c.HasComponent(api.ComponentDBAgent) && !c.AgentCreds.Provided() {
 		errs = append(errs, errors.New("agent credentials are required"))

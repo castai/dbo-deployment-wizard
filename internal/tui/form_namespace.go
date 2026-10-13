@@ -1,26 +1,27 @@
 package tui
 
 import (
-	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
+
+	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
 
-func newNamespaceForm(theme huh.Theme, d *draft) *huh.Form {
-	return huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title("K8s Namespace").
-				Description("Components will be installed to this Kubernetes namespace. Will be created if missing.").
-				Value(&d.namespace),
+func newNamespaceForm(b api.Backend) formSpec {
+	namespace := b.Namespace()
+
+	return formSpec{
+		form: huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("K8s Namespace").
+					Description("Components will be installed to this Kubernetes namespace. Will be created if missing.").
+					Value(&namespace),
+			),
 		),
-	).WithTheme(theme)
-}
+		commit: func() error {
+			b.SetNamespace(namespace)
 
-func (m *Model) handleNamespace(msg tea.KeyPressMsg) tea.Cmd {
-	cmd, done := forwardToForm(&m.namespaceForm, msg)
-	if done {
-		m.completeForm()
+			return nil
+		},
 	}
-
-	return cmd
 }

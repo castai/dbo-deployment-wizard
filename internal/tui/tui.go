@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 
-	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
@@ -22,60 +21,24 @@ import (
 // cmd entry detects it via errors.Is and prints "install aborted".
 var ErrAborted = errors.New("install aborted")
 
-// screen identifies which screen the TUI is currently rendering.
-type screen int
-
-const (
-	screenReview screen = iota
-	screenKubeContext
-	screenNamespace
-	screenChartVersion
-	screenAgentCreds
-	screenComponents
-	screenPoolingCreds
-	screenConfirm
-)
-
-// draft is the per-entry working state the forms bind to: initialized
-// from the backend on screen entry, committed on completion, discarded
-// on Esc.
-type draft struct {
-	kubeContext  string
-	namespace    string
-	chartVersion string
-	components   []string
-	agentCreds   api.Credentials
-	poolingCreds api.Credentials
-}
-
-// Model is the bubbletea model: the screen router. The review and
-// confirm screens and the embedded huh forms are sub-models owning
-// their own state and rendering; the root routes keys to the active
-// one and carries out the navigation they ask for.
+// Model is the bubbletea model: the screen router. It holds exactly
+// one active screen, routes every message to it, and carries out the
+// navigation the screens ask for through messages.
 type Model struct {
-	state screen
-
 	// backend is the service-layer contract: the single owner of the
 	// committed configuration.
 	backend api.Backend
 
-	// theme is shared with the embedded forms via WithTheme; styles is
-	// its resolution for the terminal background.
+	// styles is the Charm theme resolved for the terminal background;
+	// theme hands the forms those styles whatever background they think.
 	theme  huh.Theme
 	styles *huh.Styles
 
-	// draft is the working state of the screen being edited.
-	draft draft
+	active screen
 
-	review  *reviewModel
-	confirm *confirmModel
-
-	kubeContextForm  *huh.Form
-	chartVersionForm *huh.Form
-	namespaceForm    *huh.Form
-	componentsForm   *huh.Form
-	agentCredsForm   *huh.Form
-	poolingCredsForm *huh.Form
+	// review outlives navigation so the hub keeps its cursor when the
+	// user returns from a section.
+	review *reviewModel
 
 	done   bool
 	cancel bool
@@ -88,274 +51,91 @@ func isConfirmAction(msg tea.KeyPressMsg) bool {
 	return k.Code == tea.KeyEnter && k.Mod == 0
 }
 
-func newModel(b api.Backend) *Model {
-	m := &Model{
-		state:   screenReview,
-		backend: b,
-	}
+// isEsc reports whether msg is a plain Esc key.
+func isEsc(msg tea.KeyPressMsg) bool {
+	k := msg.Key()
 
-	m.theme = huh.ThemeFunc(huh.ThemeCharm)
-	isDark := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
-	m.styles = m.theme.Theme(isDark)
+	return k.Code == tea.KeyEsc && k.Mod == 0
+}
+
+func newModel(b api.Backend) *Model {
+	return newModelWithBackground(b, lipgloss.HasDarkBackground(os.Stdin, os.Stdout))
+}
+
+func newModelWithBackground(b api.Backend, isDark bool) *Model {
+	m := &Model{backend: b}
+
+	m.styles = huh.ThemeCharm(isDark)
+	// huh resolves the background only from tea.BackgroundColorMsg, which
+	// arrives once at startup and never reaches forms rebuilt later.
+	m.theme = huh.ThemeFunc(func(bool) *huh.Styles { return m.styles })
 
 	m.review = newReviewModel(b, m.styles, isDark)
-	m.confirm = newConfirmModel(b, m.styles)
-
-	m.syncDraft()
-	m.buildForms()
+	m.active = m.review
 
 	return m
 }
 
-func (m *Model) syncDraft() {
-	m.draft = draft{
-		kubeContext:  m.backend.KubeContext(),
-		namespace:    m.backend.Namespace(),
-		chartVersion: m.backend.ChartVersion(),
-		components:   m.backend.Components(),
-		agentCreds:   m.backend.AgentCredentials(),
-		poolingCreds: m.backend.PoolingCredentials(),
-	}
-}
-
-// buildForms builds every embedded form; the credentials screens'
-// Secret discovery is huh's dynamic options (see newCredsForm).
-func (m *Model) buildForms() {
-	m.kubeContextForm = newKubeContextForm(m.theme, m.backend, &m.draft)
-	m.chartVersionForm = newChartVersionForm(m.theme, m.backend, &m.draft)
-	m.namespaceForm = newNamespaceForm(m.theme, &m.draft)
-	m.componentsForm = newComponentsForm(m.theme, &m.draft)
-	m.agentCredsForm = newCredsForm(m.theme, m.backend, &m.draft.agentCreds, "Agent credentials")
-	m.poolingCredsForm = newCredsForm(m.theme, m.backend, &m.draft.poolingCreds, "Pooling credentials")
-}
-
-func (m *Model) setCurrentScreen(s screen) {
-	m.state = s
-	switch s {
+// newScreen is the single screen factory: forms are rebuilt on every
+// entry because a huh form is single-use.
+//
+//nolint:ireturn // the factory returns whichever screen nav targets.
+func (m *Model) newScreen(nav navigateMsg) screen {
+	switch nav.to {
 	case screenKubeContext:
-		m.syncDraft()
-		m.kubeContextForm = newKubeContextForm(m.theme, m.backend, &m.draft)
-	case screenChartVersion:
-		m.syncDraft()
-		m.chartVersionForm = newChartVersionForm(m.theme, m.backend, &m.draft)
-	case screenAgentCreds:
-		m.syncDraft()
-		m.agentCredsForm = newCredsForm(m.theme, m.backend, &m.draft.agentCreds, "Agent credentials")
-	case screenComponents:
-		m.syncDraft()
-		m.componentsForm = newComponentsForm(m.theme, &m.draft)
+		return newFormScreen(m.theme, newKubeContextForm(m.backend))
 	case screenNamespace:
-		m.syncDraft()
-		m.namespaceForm = newNamespaceForm(m.theme, &m.draft)
+		return newFormScreen(m.theme, newNamespaceForm(m.backend))
+	case screenChartVersion:
+		return newFormScreen(m.theme, newChartVersionForm(m.backend))
+	case screenAgentCreds:
+		return newFormScreen(m.theme, newAgentCredsForm(m.backend))
+	case screenComponents:
+		return newFormScreen(m.theme, newComponentsForm(m.backend))
 	case screenPoolingCreds:
-		m.syncDraft()
-		m.poolingCredsForm = newCredsForm(m.theme, m.backend, &m.draft.poolingCreds, "Pooling credentials")
+		return newFormScreen(m.theme, newPoolingCredsForm(m.backend))
+	case screenConfirm:
+		return newConfirmModel(m.backend, m.styles)
+	default:
+		m.review.reset(nav.err)
+
+		return m.review
 	}
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(repaintIn(), m.review.load())
+	return tea.Batch(repaintIn(), m.active.Init())
 }
 
 //nolint:ireturn // bubbletea v2 Model.Update mandates a tea.Model return.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	before := m.state
-	var cmd tea.Cmd
-
 	switch typed := msg.(type) {
 	case repaintMsg:
-		cmd = tea.Batch(tea.ClearScreen, repaintIn())
+		return m, tea.Batch(tea.ClearScreen, repaintIn())
 	case tea.KeyPressMsg:
-		_, cmd = m.handleKey(typed)
-	case confirmSummaryMsg:
-		m.confirm.update(typed)
-	case reviewTitleMsg:
-		m.review.setTitle(typed)
-	case spinner.TickMsg:
-		// huh's own loading spinners tick through the same message type.
-		cmd = tea.Batch(m.review.tick(typed), m.confirm.tick(typed), m.updateActiveForm(msg))
-	case tea.BackgroundColorMsg:
-		_, _ = forwardToForm(&m.kubeContextForm, typed)
-		_, _ = forwardToForm(&m.poolingCredsForm, typed)
-		_, _ = forwardToForm(&m.chartVersionForm, typed)
-		_, _ = forwardToForm(&m.namespaceForm, typed)
-		_, _ = forwardToForm(&m.componentsForm, typed)
-		_, _ = forwardToForm(&m.agentCredsForm, typed)
-	default:
-		cmd = m.updateActiveForm(msg)
-	}
-
-	if m.state != before {
-		cmd = tea.Batch(cmd, tea.ClearScreen)
-		// The edit may have changed the release coordinates.
-		if m.state == screenReview {
-			cmd = tea.Batch(cmd, m.review.load())
-		}
-	}
-
-	return m, cmd
-}
-
-// handleKey is the central dispatcher: Ctrl+C aborts from anywhere;
-// Esc quits from review, backs out of sub-screens.
-//
-//nolint:ireturn // bubbletea v2 Model.Update mandates a tea.Model return.
-func (m *Model) handleKey(msg tea.KeyPressMsg) (*Model, tea.Cmd) {
-	k := msg.Key()
-
-	if k.Mod&tea.ModCtrl != 0 {
-		m.cancel = true
-
-		return m, tea.Quit
-	}
-
-	if k.Code == tea.KeyEsc && k.Mod == 0 {
-		if m.state == screenReview {
+		if typed.String() == "ctrl+c" {
 			m.cancel = true
 
 			return m, tea.Quit
 		}
-		m.goToReview()
+	case navigateMsg:
+		m.active = m.newScreen(typed)
 
-		return m, nil
-	}
+		return m, tea.Batch(tea.ClearScreen, m.active.Init())
+	case abortMsg:
+		m.cancel = true
 
-	return m, m.currentViewHandleKey(msg)
-}
-
-func (m *Model) currentViewHandleKey(msg tea.KeyPressMsg) tea.Cmd {
-	switch m.state {
-	case screenReview:
-		return m.handleReview(msg)
-	case screenKubeContext:
-		return m.handleKubeContext(msg)
-	case screenNamespace:
-		return m.handleNamespace(msg)
-	case screenChartVersion:
-		return m.handleChartVersion(msg)
-	case screenAgentCreds:
-		return m.handleAgentCreds(msg)
-	case screenComponents:
-		return m.handleComponents(msg)
-	case screenPoolingCreds:
-		return m.handlePoolingCreds(msg)
-	case screenConfirm:
-		return m.handleConfirm(msg)
-	}
-
-	return nil
-}
-
-// handleReview routes the review sub-model's keys and carries out the
-// navigation it asks for: entering the selected section, or — from
-// Continue — moving on to confirmation.
-func (m *Model) handleReview(msg tea.KeyPressMsg) tea.Cmd {
-	cmd, next := m.review.update(msg)
-	if next == screenReview {
-		return cmd
-	}
-
-	m.setCurrentScreen(next)
-	if next == screenConfirm {
-		return m.confirm.enter()
-	}
-	if f := m.activeForm(); f != nil {
-		// Init focuses the form's first field.
-		return tea.Batch(cmd, (*f).Init())
-	}
-
-	return cmd
-}
-
-// handleConfirm: Enter applies once the confirm sub-model's summary
-// has loaded — the program quits and the install continues in plain
-// CLI mode. Enter while loading does nothing, so a double-click
-// through from review can never apply a summary the user has not
-// seen; nor does it when the summary failed.
-func (m *Model) handleConfirm(msg tea.KeyPressMsg) tea.Cmd {
-	if isConfirmAction(msg) && m.confirm.ready() {
+		return m, tea.Quit
+	case applyMsg:
 		m.done = true
 
-		return tea.Quit
+		return m, tea.Quit
 	}
 
-	return nil
-}
+	var cmd tea.Cmd
+	m.active, cmd = m.active.Update(msg)
 
-func (m *Model) goToReview() {
-	m.review.backToReview()
-	m.state = screenReview
-}
-
-// forwardToForm routes a message into an embedded huh form and reports
-// whether the form finished.
-func forwardToForm(f **huh.Form, msg tea.Msg) (tea.Cmd, bool) {
-	if *f == nil {
-		return nil, false
-	}
-	model, cmd := (*f).Update(msg)
-	form, ok := model.(*huh.Form)
-	if !ok {
-		return cmd, false
-	}
-	*f = form
-
-	return cmd, form.State != huh.StateNormal
-}
-
-// updateActiveForm routes a non-key message into the current screen's
-// form, committing it if that completed it.
-func (m *Model) updateActiveForm(msg tea.Msg) tea.Cmd {
-	f := m.activeForm()
-	if f == nil {
-		return nil
-	}
-	cmd, done := forwardToForm(f, msg)
-	if done {
-		m.completeForm()
-	}
-
-	return cmd
-}
-
-// activeForm returns the form embedded in the current screen, if any.
-func (m *Model) activeForm() **huh.Form {
-	switch m.state {
-	case screenKubeContext:
-		return &m.kubeContextForm
-	case screenChartVersion:
-		return &m.chartVersionForm
-	case screenNamespace:
-		return &m.namespaceForm
-	case screenComponents:
-		return &m.componentsForm
-	case screenAgentCreds:
-		return &m.agentCredsForm
-	case screenPoolingCreds:
-		return &m.poolingCredsForm
-	}
-
-	return nil
-}
-
-// completeForm commits the completed form's draft through the
-// backend's commands — the UI's single write path.
-func (m *Model) completeForm() {
-	switch m.state {
-	case screenKubeContext:
-		m.backend.SetKubeContext(m.draft.kubeContext)
-	case screenChartVersion:
-		m.backend.SetChartVersion(m.draft.chartVersion)
-	case screenNamespace:
-		m.backend.SetNamespace(m.draft.namespace)
-	case screenComponents:
-		_ = m.backend.SetComponents(m.draft.components)
-	case screenAgentCreds:
-		m.backend.SetAgentCredentials(m.draft.agentCreds)
-	case screenPoolingCreds:
-		m.backend.SetPoolingCredentials(m.draft.poolingCreds)
-	}
-	m.goToReview()
+	return m, cmd
 }
 
 // Run starts the bubbletea program. The install itself runs after the

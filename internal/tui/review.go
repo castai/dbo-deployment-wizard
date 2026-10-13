@@ -28,7 +28,7 @@ type reviewItem struct {
 	// err is the Continue item's validation message, rendered
 	// above the button.
 	err    string
-	target screen
+	target screenID
 	action bool
 }
 
@@ -149,7 +149,7 @@ const requiredSub = "⚠ required"
 const maskedPasswordMax = 16
 
 func maskPassword(pw string) string {
-	return strings.Repeat("•", max(len(pw), maskedPasswordMax))
+	return strings.Repeat("•", min(len(pw), maskedPasswordMax))
 }
 
 func emptyDash(s string) string {
@@ -178,44 +178,75 @@ func chartVersionDisplay(version, latestVersion string) string {
 	return emptyDash(version)
 }
 
-// reviewTitleLoading is the title while the release lookup is in flight.
-const reviewTitleLoading = "Checking for an existing Helm deployment…"
+// The titles while discovery and the release lookup are in flight.
+const (
+	reviewTitleDiscovering = "Detecting current kubectl context and latest chart version…"
+	reviewTitleLoading     = "Checking for an existing Helm deployment…"
+)
 
-// reviewTitleMsg delivers the review screen's deferred title; fetch
-// identifies which lookup it answers.
-type reviewTitleMsg struct {
-	title string
-	fetch int
+// reviewTitle names whether the committed coordinates hold an
+// existing release the install would upgrade, or none — a new
+// installation it would create.
+func reviewTitle(exists bool, releaseName string) string {
+	if exists {
+		return "Updating Helm deployment: " + releaseName
+	}
+
+	return "Installing new Helm deployment: " + releaseName
 }
 
-// reviewTitle renders the review screen's title; the suffix names
-// whether the committed coordinates hold an existing release the
-// install would upgrade, or none — a new installation it would
-// create — or, when the lookup fails, why.
-func reviewTitle(b api.Backend) string {
-	exists, err := b.DeploymentExists()
+// discovery is the outcome of detecting the defaults for the
+// coordinates the CLI left unset; latestVersion also labels the
+// chart-version row.
+type discovery struct {
+	kubeContext      string
+	kubeContextErr   error
+	latestVersion    string
+	latestVersionErr error
+}
+
+// coordinateSub is a coordinate row's sub line while its value is
+// unset: nothing while discovery runs, else why discovery failed,
+// else the "required" marker.
+func coordinateSub(value string, discovering bool, err error) (string, bool) {
 	switch {
+	case value != "" || discovering:
+		return "", false
 	case err != nil:
-		return truncate(err.Error(), 100)
-	case exists:
-		return "Updating Helm deployment: " + b.ReleaseName()
+		return "⚠ " + truncate(err.Error(), 100), true
 	default:
-		return "Installing new Helm deployment: " + b.ReleaseName()
+		return requiredSub, true
 	}
 }
 
+// rowState is what the rows show beyond the backend's committed state.
+type rowState struct {
+	discovery   discovery
+	discovering bool
+	// reviewErr is the backend's Continue validation message; it
+	// rides the Continue action and renders above its button.
+	reviewErr string
+}
+
 // reviewItems builds the review rows from the backend's committed
-// state; reviewErr — the backend's Continue validation message —
-// rides the Continue action and renders above its button.
-func reviewItems(b api.Backend, reviewErr string) []list.Item {
+// state and s.
+func reviewItems(b api.Backend, s rowState) []list.Item {
 	agentCreds := b.AgentCredentials()
 	pooling := b.PoolingCredentials()
-	latestVersion := b.LatestChartVersion()
+
+	kubeContext := reviewItem{label: "Kubectl context:", value: emptyDash(b.KubeContext()), target: screenKubeContext}
+	kubeContext.sub, kubeContext.subWarn = coordinateSub(b.KubeContext(), s.discovering, s.discovery.kubeContextErr)
+	version := reviewItem{
+		label:  "Chart version:",
+		value:  chartVersionDisplay(b.ChartVersion(), s.discovery.latestVersion),
+		target: screenChartVersion,
+	}
+	version.sub, version.subWarn = coordinateSub(b.ChartVersion(), s.discovering, s.discovery.latestVersionErr)
 
 	rows := []reviewItem{
-		{label: "Kubectl context:", value: emptyDash(b.KubeContext()), target: screenKubeContext},
+		kubeContext,
 		{label: "Target namespace:", value: emptyDash(b.Namespace()), target: screenNamespace},
-		{label: "Chart version:", value: chartVersionDisplay(b.ChartVersion(), latestVersion), target: screenChartVersion},
+		version,
 	}
 
 	// Each credentials row exists only while its component is enabled.
@@ -248,58 +279,54 @@ func reviewItems(b api.Backend, reviewErr string) []list.Item {
 	rows = append(rows, reviewItem{
 		label:  "Continue",
 		action: true,
-		err:    reviewErr,
+		err:    s.reviewErr,
 	})
 
 	return lo.Map(rows, func(r reviewItem, _ int) list.Item { return r })
 }
 
-// handleReview and handleConfirm moved to the root model (tui.go);
-// the screen state lives in reviewModel below.
-
 // newItemList builds an item list with the wizard's shared chrome:
-// no title, status bar, or help, and no quit bindings.
+// no title, status bar, help, filtering, or quit bindings.
 func newItemList(styles *huh.Styles, isDark bool) list.Model {
 	l := list.New(nil, newReviewDelegate(styles, isDark), 80, 14)
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
 	l.SetShowTitle(false)
 	l.DisableQuitKeybindings()
+	// The list's own filter would claim Esc, which quits the wizard here.
+	l.SetFilteringEnabled(false)
 	l.InfiniteScrolling = true
 
 	return l
 }
 
-// reviewModel is the review screen's sub-model: the configuration hub
-// list with the Continue action. It owns the list, the validation
-// message riding Continue, and the screen's rendering; the root model
-// routes keys in and carries out the navigation it asks for.
+// reviewModel is the review screen: the configuration hub list with
+// the Continue action. It owns the list, the validation message riding
+// Continue, and the screen's rendering.
 type reviewModel struct {
 	backend api.Backend
 	styles  *huh.Styles
 	list    list.Model
 
-	// reviewError is the backend's Continue validation message,
-	// rendered above the Continue action; cleared when the user
-	// returns from a section (the edit may have fixed it).
+	// reviewError is the backend's Continue validation (or a failed
+	// commit's) message, rendered above the Continue action; reset
+	// when the user returns from a section (the edit may have fixed it).
 	reviewError string
 
-	// title is the deferred release lookup's answer, the spinner
-	// standing in while loading; fetch stamps each lookup so stale
-	// responses drop.
-	title   string
-	loading bool
-	fetch   int
-	spinner spinner.Model
+	// defaults detects the unset coordinates, once per run; release is
+	// the deferred DeploymentExists lookup.
+	defaults   async[discovery]
+	discovered bool
+	release    async[bool]
 }
 
 func newReviewModel(b api.Backend, styles *huh.Styles, isDark bool) *reviewModel {
 	r := &reviewModel{
-		backend: b,
-		styles:  styles,
-		list:    newItemList(styles, isDark),
-		loading: true,
-		spinner: newSpinner(styles),
+		backend:  b,
+		styles:   styles,
+		list:     newItemList(styles, isDark),
+		defaults: newAsync[discovery](styles),
+		release:  newAsync[bool](styles),
 	}
 	r.sync()
 
@@ -316,7 +343,11 @@ func newReviewModel(b api.Backend, styles *huh.Styles, isDark bool) *reviewModel
 func (r *reviewModel) sync() {
 	selected, hadSelection := r.list.SelectedItem().(reviewItem)
 
-	items := reviewItems(r.backend, r.reviewError)
+	items := reviewItems(r.backend, rowState{
+		discovery:   r.defaults.value,
+		discovering: r.defaults.loading(),
+		reviewErr:   r.reviewError,
+	})
 	r.list.SetItems(items)
 
 	h := 2*len(items) + 2
@@ -337,83 +368,131 @@ func (r *reviewModel) sync() {
 	}
 }
 
-// backToReview resets the rows for re-entry from a sub-screen; the
-// validation message clears — the edit may have fixed it.
-func (r *reviewModel) backToReview() {
+// reset prepares the rows for re-entry from a section, showing the
+// section's failed commit, if any.
+func (r *reviewModel) reset(commitErr error) {
 	r.reviewError = ""
-	r.sync()
-}
-
-// load defers the release lookup to a background command: it shells
-// out to helm, which run from view froze the UI — Ctrl+C included.
-func (r *reviewModel) load() tea.Cmd {
-	r.loading = true
-	r.fetch++
-	b, fetch := r.backend, r.fetch
-
-	return tea.Batch(r.spinner.Tick, func() tea.Msg {
-		return reviewTitleMsg{title: reviewTitle(b), fetch: fetch}
-	})
-}
-
-// tick animates the spinner, re-arming it only while the lookup runs.
-func (r *reviewModel) tick(msg spinner.TickMsg) tea.Cmd {
-	if !r.loading {
-		return nil
+	if commitErr != nil {
+		r.reviewError = commitErr.Error()
 	}
-	var cmd tea.Cmd
-	r.spinner, cmd = r.spinner.Update(msg)
+}
+
+// Init detects the defaults once per run, then re-checks the release —
+// the edit may have changed its coordinates. Both reach out, so they
+// run in the background to keep the UI (Ctrl+C included) responsive.
+func (r *reviewModel) Init() tea.Cmd {
+	if r.discovered {
+		r.sync()
+
+		return r.lookupRelease()
+	}
+	r.discovered = true
+	// Read on the UI goroutine, which owns the committed state.
+	b, needContext := r.backend, r.backend.KubeContext() == ""
+	cmd := r.defaults.start(func() (discovery, error) {
+		var d discovery
+		if needContext {
+			d.kubeContext, d.kubeContextErr = b.CurrentKubeContext()
+		}
+		d.latestVersion, d.latestVersionErr = b.LatestChartVersion()
+
+		return d, nil
+	})
+	r.sync()
 
 	return cmd
 }
 
-// setTitle applies a deferred title, dropping responses a newer lookup
-// has superseded.
-func (r *reviewModel) setTitle(msg reviewTitleMsg) {
-	if msg.fetch != r.fetch {
-		return
+// applyDefaults commits the detected defaults for whatever is still
+// unset; a section the user edited meanwhile wins.
+func (r *reviewModel) applyDefaults() {
+	d := r.defaults.value
+	if d.kubeContext != "" && r.backend.KubeContext() == "" {
+		r.backend.SetKubeContext(d.kubeContext)
 	}
-	r.loading = false
-	r.title = msg.title
+	if d.latestVersion != "" && r.backend.ChartVersion() == "" {
+		r.backend.SetChartVersion(d.latestVersion)
+	}
 }
 
-// update routes the review screen's keys; the second return names the
-// screen to navigate to, screenReview to stay.
-func (r *reviewModel) update(msg tea.KeyPressMsg) (tea.Cmd, screen) {
-	if isConfirmAction(msg) {
-		if it, ok := r.list.SelectedItem().(reviewItem); ok {
-			if it.action {
-				if err := r.backend.Validate(); err != nil {
-					r.reviewError = err.Error()
-					r.sync()
-
-					return nil, screenReview
-				}
-
-				return nil, screenConfirm
-			}
-
-			return nil, it.target
-		}
-
-		return nil, screenReview
+// lookupRelease re-checks the release; without a context there is
+// nothing to check.
+func (r *reviewModel) lookupRelease() tea.Cmd {
+	if r.backend.KubeContext() == "" {
+		return nil
 	}
 
-	var cmd tea.Cmd
-	r.list, cmd = r.list.Update(msg)
+	return r.release.start(r.backend.DeploymentExists)
+}
 
-	return cmd, screenReview
+//nolint:ireturn // screen.Update returns the next screen.
+func (r *reviewModel) Update(msg tea.Msg) (screen, tea.Cmd) {
+	switch msg := msg.(type) {
+	case asyncResultMsg[discovery]:
+		if r.defaults.apply(msg) {
+			r.applyDefaults()
+			r.sync()
+
+			return r, r.lookupRelease()
+		}
+	case asyncResultMsg[bool]:
+		r.release.apply(msg)
+	case spinner.TickMsg:
+		return r, tea.Batch(r.defaults.tick(msg), r.release.tick(msg))
+	case tea.KeyPressMsg:
+		return r, r.handleKey(msg)
+	}
+
+	return r, nil
+}
+
+// handleKey: Esc quits, Enter enters the selected section or — from
+// Continue, once Validate passes — moves on to confirmation.
+func (r *reviewModel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	if isEsc(msg) {
+		return send(abortMsg{})
+	}
+	if !isConfirmAction(msg) {
+		var cmd tea.Cmd
+		r.list, cmd = r.list.Update(msg)
+
+		return cmd
+	}
+	it, ok := r.list.SelectedItem().(reviewItem)
+	switch {
+	case !ok:
+		return nil
+	case !it.action:
+		return navigate(it.target)
+	}
+	if err := r.backend.Validate(); err != nil {
+		r.reviewError = err.Error()
+		r.sync()
+
+		return nil
+	}
+
+	return navigate(screenConfirm)
 }
 
 // view renders the whole screen: title, rows, help footer.
-func (r *reviewModel) view() string {
-	title := r.title
-	if r.loading {
-		title = r.spinner.View() + " " + reviewTitleLoading
+func (r *reviewModel) View() string {
+	var title string
+	switch {
+	case r.defaults.loading():
+		title = r.styles.Group.Title.Render(r.defaults.spinner.View() + " " + reviewTitleDiscovering)
+	case r.backend.KubeContext() == "":
+		title = r.styles.Group.Title.Render("Helm deployment: " + r.backend.ReleaseName())
+	case r.release.loading():
+		title = r.styles.Group.Title.Render(r.release.spinner.View() + " " + reviewTitleLoading)
+	case r.release.err != nil:
+		title = renderError(r.styles, r.release.err)
+	default:
+		title = r.styles.Group.Title.Render(reviewTitle(r.release.value, r.backend.ReleaseName()))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		r.styles.Group.Title.Render(title),
+		title,
 		r.list.View(),
 		r.styles.Help.ShortDesc.Render(r.footer()),
 	)

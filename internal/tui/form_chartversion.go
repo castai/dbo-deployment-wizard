@@ -2,8 +2,8 @@ package tui
 
 import (
 	"strings"
+	"sync"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/samber/lo"
 
@@ -28,31 +28,48 @@ func versionLabel(v api.HelmChartVersion, latest bool) string {
 }
 
 // newChartVersionForm builds the chart-version form with release-date
-// labels; it degrades to a free-text Input when the repo lookup
-// returned no versions.
-func newChartVersionForm(theme huh.Theme, b api.Backend, d *draft) *huh.Form {
-	return huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Chart version").
-				Description("Pick a Helm chart version to use.").
-				OptionsFunc(func() []huh.Option[string] {
-					versions, _ := b.ChartVersions()
+// labels.
+func newChartVersionForm(b api.Backend) formSpec {
+	version := b.ChartVersion()
+	// Captured here: the options func runs off the UI goroutine, which
+	// owns the bound value.
+	current := version
+	discover := sync.OnceValues(b.ChartVersions)
 
-					return lo.Map(versions, func(v api.HelmChartVersion, i int) huh.Option[string] {
-						return huh.NewOption(versionLabel(v, i == 0), v.Number).Selected(v.Number == d.chartVersion)
-					})
-				}, d.chartVersion).
-				Value(&d.chartVersion),
+	return formSpec{
+		form: huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Chart version").
+					DescriptionFunc(func() string {
+						_, err := discover()
+
+						return discoveryDescription(err, "chart versions", "Pick a Helm chart version to use.")
+					}, current).
+					OptionsFunc(func() []huh.Option[string] {
+						versions, _ := discover()
+
+						return lo.Map(versions, func(v api.HelmChartVersion, i int) huh.Option[string] {
+							return huh.NewOption(versionLabel(v, i == 0), v.Number).Selected(v.Number == current)
+						})
+					}, current).
+					Value(&version),
+			),
 		),
-	).WithTheme(theme)
+		commit: func() error {
+			b.SetChartVersion(version)
+
+			return nil
+		},
+	}
 }
 
-func (m *Model) handleChartVersion(msg tea.KeyPressMsg) tea.Cmd {
-	cmd, done := forwardToForm(&m.chartVersionForm, msg)
-	if done {
-		m.completeForm()
+// discoveryDescription is a picker's description: why its options are
+// missing when discovery failed, else its usual hint.
+func discoveryDescription(err error, subject, hint string) string {
+	if err != nil {
+		return "Could not list " + subject + ": " + err.Error()
 	}
 
-	return cmd
+	return hint
 }

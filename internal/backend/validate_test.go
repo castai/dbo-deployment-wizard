@@ -44,6 +44,14 @@ func TestConfigValidate(t *testing.T) {
 			mutate:  func(c *Config) { c.ChartName = "" },
 			wantErr: "chart name is required",
 		},
+		"missing kube context": {
+			mutate:  func(c *Config) { c.KubeContext = "" },
+			wantErr: "kubectl context is required",
+		},
+		"missing chart version": {
+			mutate:  func(c *Config) { c.ChartVersion = "" },
+			wantErr: "chart version is required",
+		},
 		"missing agent credentials": {
 			mutate:  func(c *Config) { c.AgentCreds = api.Credentials{} },
 			wantErr: "agent credentials are required",

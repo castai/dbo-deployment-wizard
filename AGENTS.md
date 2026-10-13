@@ -12,6 +12,22 @@ components, database credentials), shows a review summary, and runs
   reference `backend` directly (enforced by a depguard rule in `.golangci.yml`)
 - the rest — backend (`internal/backend`; generated mocks live in `mocks/`)
 
+### `api` and `backend` are UI-agnostic
+
+Together they are the wizard's headless logic: everything a frontend
+needs, with no knowledge of which frontend exists.
+
+- The implementation makes no assumptions about the UI that drives it:
+  no ordering tailored to screens, no return shapes chosen for how one
+  view renders them, no behaviour that only makes sense for a TUI.
+- Comments are phrased in domain terms. Never mention screens, forms,
+  spinners, key presses, "the user picks", or what a frontend does with
+  a result. Self-explanatory contract methods get no comment; a comment
+  is warranted only to state something specific about the backend's
+  behaviour (ordering, failure semantics, caching).
+- Anything that is really about the UI belongs in `internal/tui`, next
+  to the code that needs it.
+
 ## Comments
 
 - Add comments sparingly — only where completely necessary to explain

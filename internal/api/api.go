@@ -23,11 +23,11 @@ type Backend interface {
 	Components() []string
 	KubeContexts() ([]string, error)
 	ChartVersions() ([]HelmChartVersion, error)
-	// LatestChartVersion returns "" when the repo lookup failed.
-	LatestChartVersion() string
+	CurrentKubeContext() (string, error)
+	LatestChartVersion() (string, error)
 	// Secrets returns the Secret names in the selected context and
-	// namespace; a discovery failure returns none.
-	Secrets() []string
+	// namespace, or the discovery failure.
+	Secrets() ([]string, error)
 	// DeploymentExists reports whether the committed deployment
 	// coordinates — context, namespace, release name — already hold a
 	// helm release, i.e. whether Install would upgrade it rather
@@ -52,10 +52,8 @@ type Backend interface {
 
 	// --- actions ---
 
-	// Validate reports every unmet install prerequisite (the
-	// enabled components' credentials, the target namespace) as one
-	// error; nil means the configuration is ready to install. The
-	// review screen gates its Continue action on it.
+	// Validate reports every unmet install prerequisite as one
+	// error; nil means the configuration is ready to install.
 	Validate() error
 	// Install runs the install, writing the CLI transcript to stdout;
 	// DryRun prints the commands instead of executing.
