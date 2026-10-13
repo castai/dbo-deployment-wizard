@@ -181,27 +181,15 @@ func chartVersionDisplay(version, latestVersion string) string {
 // reviewTitleLoading is the title while the release lookup is in flight.
 const reviewTitleLoading = "Checking for an existing Helm deployment…"
 
-// reviewTitleMsg delivers the review screen's deferred title; fetch
-// identifies which lookup it answers.
-type reviewTitleMsg struct {
-	title string
-	fetch int64
-}
-
-// reviewTitle renders the review screen's title; the suffix names
-// whether the committed coordinates hold an existing release the
-// install would upgrade, or none — a new installation it would
-// create — or, when the lookup fails, why.
-func reviewTitle(b api.Backend) string {
-	exists, err := b.DeploymentExists()
-	switch {
-	case err != nil:
-		return truncate(err.Error(), 100)
-	case exists:
-		return "Updating Helm deployment: " + b.ReleaseName()
-	default:
-		return "Installing new Helm deployment: " + b.ReleaseName()
+// reviewTitle names whether the committed coordinates hold an
+// existing release the install would upgrade, or none — a new
+// installation it would create.
+func reviewTitle(exists bool, releaseName string) string {
+	if exists {
+		return "Updating Helm deployment: " + releaseName
 	}
+
+	return "Installing new Helm deployment: " + releaseName
 }
 
 // reviewItems builds the review rows from the backend's committed
@@ -275,18 +263,13 @@ type reviewModel struct {
 	styles  *huh.Styles
 	list    list.Model
 
-	// reviewError is the backend's Continue validation message,
-	// rendered above the Continue action; cleared when the user
-	// returns from a section (the edit may have fixed it).
+	// reviewError is the backend's Continue validation (or a failed
+	// commit's) message, rendered above the Continue action; reset
+	// when the user returns from a section (the edit may have fixed it).
 	reviewError string
 
-	// title is the deferred release lookup's answer, the spinner
-	// standing in while loading; fetch stamps each lookup so stale
-	// responses drop.
-	title   string
-	loading bool
-	fetch   int64
-	spinner spinner.Model
+	// release is the deferred DeploymentExists lookup.
+	release async[bool]
 }
 
 func newReviewModel(b api.Backend, styles *huh.Styles, isDark bool) *reviewModel {
@@ -294,9 +277,9 @@ func newReviewModel(b api.Backend, styles *huh.Styles, isDark bool) *reviewModel
 		backend: b,
 		styles:  styles,
 		list:    newItemList(styles, isDark),
-		loading: true,
-		spinner: newSpinner(styles),
+		release: newAsync[bool](styles),
 	}
+	r.release.busy = true
 	r.sync()
 
 	// Start on the Continue action
@@ -333,56 +316,31 @@ func (r *reviewModel) sync() {
 	}
 }
 
-// Init resets the rows for (re-)entry and re-checks the release: the
-// edit may have fixed the validation message or changed the release
-// coordinates.
-func (r *reviewModel) Init() tea.Cmd {
+// reset prepares the rows for re-entry from a section, showing the
+// section's failed commit, if any.
+func (r *reviewModel) reset(commitErr error) {
 	r.reviewError = ""
+	if commitErr != nil {
+		r.reviewError = commitErr.Error()
+	}
+}
+
+// Init re-checks the release — the edit may have changed its
+// coordinates. The lookup shells out to helm, so it runs in the
+// background to keep the UI (Ctrl+C included) responsive.
+func (r *reviewModel) Init() tea.Cmd {
 	r.sync()
 
-	return r.load()
-}
-
-// load defers the release lookup to a background command: it shells
-// out to helm, which run from view froze the UI — Ctrl+C included.
-func (r *reviewModel) load() tea.Cmd {
-	r.loading = true
-	r.fetch = nextFetch()
-	b, fetch := r.backend, r.fetch
-
-	return tea.Batch(r.spinner.Tick, func() tea.Msg {
-		return reviewTitleMsg{title: reviewTitle(b), fetch: fetch}
-	})
-}
-
-// tick animates the spinner, re-arming it only while the lookup runs.
-func (r *reviewModel) tick(msg spinner.TickMsg) tea.Cmd {
-	if !r.loading {
-		return nil
-	}
-	var cmd tea.Cmd
-	r.spinner, cmd = r.spinner.Update(msg)
-
-	return cmd
-}
-
-// setTitle applies a deferred title, dropping responses a newer lookup
-// has superseded.
-func (r *reviewModel) setTitle(msg reviewTitleMsg) {
-	if msg.fetch != r.fetch {
-		return
-	}
-	r.loading = false
-	r.title = msg.title
+	return r.release.start(r.backend.DeploymentExists)
 }
 
 //nolint:ireturn // screen.Update returns the next screen.
 func (r *reviewModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch msg := msg.(type) {
-	case reviewTitleMsg:
-		r.setTitle(msg)
+	case asyncResultMsg[bool]:
+		r.release.apply(msg)
 	case spinner.TickMsg:
-		return r, r.tick(msg)
+		return r, r.release.tick(msg)
 	case tea.KeyPressMsg:
 		return r, r.handleKey(msg)
 	}
@@ -421,13 +379,18 @@ func (r *reviewModel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // view renders the whole screen: title, rows, help footer.
 func (r *reviewModel) View() string {
-	title := r.title
-	if r.loading {
-		title = r.spinner.View() + " " + reviewTitleLoading
+	var title string
+	switch {
+	case r.release.loading():
+		title = r.styles.Group.Title.Render(r.release.spinner.View() + " " + reviewTitleLoading)
+	case r.release.err != nil:
+		title = renderError(r.styles, r.release.err)
+	default:
+		title = r.styles.Group.Title.Render(reviewTitle(r.release.value, r.backend.ReleaseName()))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		r.styles.Group.Title.Render(title),
+		title,
 		r.list.View(),
 		r.styles.Help.ShortDesc.Render(r.footer()),
 	)

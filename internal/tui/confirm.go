@@ -19,60 +19,26 @@ import (
 type confirmModel struct {
 	backend api.Backend
 	styles  *huh.Styles
-	lines   []string
-	err     error
-	loading bool
-	spinner spinner.Model
-
-	// fetch stamps each entry so stale responses drop.
-	fetch int64
+	summary async[[]string]
 }
 
 func newConfirmModel(b api.Backend, styles *huh.Styles) *confirmModel {
-	return &confirmModel{backend: b, styles: styles, spinner: newSpinner(styles)}
-}
-
-// confirmSummaryMsg delivers the screen's deferred summary; fetch
-// identifies which entry's request it answers.
-type confirmSummaryMsg struct {
-	lines []string
-	err   error
-	fetch int64
+	return &confirmModel{backend: b, styles: styles, summary: newAsync[[]string](styles)}
 }
 
 // Init defers the summary to a background command so entering is
-// instant; the fetch stamp drops responses superseded by a newer entry.
+// instant.
 func (c *confirmModel) Init() tea.Cmd {
-	c.loading = true
-	c.lines, c.err = nil, nil
-	c.fetch = nextFetch()
-	b, fetch := c.backend, c.fetch
-
-	return tea.Batch(c.spinner.Tick, func() tea.Msg {
-		lines, err := b.SummarizeInstallationImpact()
-
-		return confirmSummaryMsg{lines: lines, err: err, fetch: fetch}
-	})
-}
-
-// tick animates the spinner, re-arming it only while the summary loads.
-func (c *confirmModel) tick(msg spinner.TickMsg) tea.Cmd {
-	if !c.loading {
-		return nil
-	}
-	var cmd tea.Cmd
-	c.spinner, cmd = c.spinner.Update(msg)
-
-	return cmd
+	return c.summary.start(c.backend.SummarizeInstallationImpact)
 }
 
 //nolint:ireturn // screen.Update returns the next screen.
 func (c *confirmModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch msg := msg.(type) {
-	case confirmSummaryMsg:
-		c.setSummary(msg)
+	case asyncResultMsg[[]string]:
+		c.summary.apply(msg)
 	case spinner.TickMsg:
-		return c, c.tick(msg)
+		return c, c.summary.tick(msg)
 	case tea.KeyPressMsg:
 		return c, c.handleKey(msg)
 	}
@@ -96,21 +62,11 @@ func (c *confirmModel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// setSummary applies a deferred summary, dropping responses a newer
-// entry has superseded.
-func (c *confirmModel) setSummary(msg confirmSummaryMsg) {
-	if msg.fetch != c.fetch {
-		return
-	}
-	c.loading = false
-	c.lines, c.err = msg.lines, msg.err
-}
-
 // ready reports whether Apply is available: only once the summary has
 // loaded and succeeded, so the user never applies a change the wizard
 // could not preview.
 func (c *confirmModel) ready() bool {
-	return !c.loading && c.err == nil
+	return !c.summary.loading() && c.summary.err == nil
 }
 
 // view renders the whole screen: title, summary, Apply button, help
@@ -119,16 +75,14 @@ func (c *confirmModel) View() string {
 	// The blank lines mirror the review screen's list padding.
 	var body strings.Builder
 	fmt.Fprintln(&body)
-	if c.loading {
-		fmt.Fprintln(&body, c.spinner.View()+" "+c.styles.Focused.Description.Render("Gathering installation summary…"))
+	if c.summary.loading() {
+		fmt.Fprintln(&body, c.summary.spinner.View()+" "+c.styles.Focused.Description.Render("Gathering installation summary…"))
 	} else {
-		for _, line := range c.lines {
+		for _, line := range c.summary.value {
 			fmt.Fprintln(&body, c.styles.Focused.File.Render(line))
 		}
-		if c.err != nil {
-			for _, line := range strings.Split(c.err.Error(), "\n") {
-				fmt.Fprintln(&body, c.styles.Focused.ErrorMessage.Render(line))
-			}
+		if c.summary.err != nil {
+			fmt.Fprintln(&body, renderError(c.styles, c.summary.err))
 		}
 	}
 

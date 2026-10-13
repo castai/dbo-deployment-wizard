@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"sync/atomic"
-
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
@@ -30,9 +28,11 @@ const (
 	screenConfirm
 )
 
-// navigateMsg asks the root to replace the active screen.
+// navigateMsg asks the root to replace the active screen; err is a
+// failed commit to show on review.
 type navigateMsg struct {
-	to screenID
+	to  screenID
+	err error
 }
 
 func navigate(to screenID) tea.Cmd {
@@ -94,9 +94,7 @@ func (s *formScreen) Init() tea.Cmd {
 //nolint:ireturn // screen.Update returns the next screen.
 func (s *formScreen) Update(msg tea.Msg) (screen, tea.Cmd) {
 	if _, ok := msg.(formDoneMsg); ok {
-		_ = s.commit()
-
-		return s, navigate(screenReview)
+		return s, send(navigateMsg{to: screenReview, err: s.commit()})
 	}
 
 	keyMsg, isKey := msg.(tea.KeyPressMsg)
@@ -132,9 +130,3 @@ func fieldClaimsKey(f huh.Field, msg tea.KeyPressMsg) bool {
 func (s *formScreen) View() string {
 	return s.form.View()
 }
-
-// fetchSeq stamps background loads; it is global because screens are
-// rebuilt on entry and a stale result may reach a newer instance.
-var fetchSeq atomic.Int64
-
-func nextFetch() int64 { return fetchSeq.Add(1) }

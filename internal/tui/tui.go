@@ -95,6 +95,8 @@ func (m *Model) newScreen(nav navigateMsg) screen {
 	case screenConfirm:
 		return newConfirmModel(m.backend, m.styles)
 	default:
+		m.review.reset(nav.err)
+
 		return m.review
 	}
 }
