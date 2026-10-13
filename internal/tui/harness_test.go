@@ -26,17 +26,19 @@ type fakeBackend struct {
 
 	currentContext    string
 	currentContextErr error
-	latestErr         error
-	kubeContexts      []string
-	kubeContextsErr   error
-	versions          []api.HelmChartVersion
-	versionsErr       error
-	secrets           []string
-	secretsErr        error
-	exists            bool
-	existsErr         error
-	summary           []string
-	summaryErr        error
+	// discoveryGate, when set, holds CurrentKubeContext until closed.
+	discoveryGate   chan struct{}
+	latestErr       error
+	kubeContexts    []string
+	kubeContextsErr error
+	versions        []api.HelmChartVersion
+	versionsErr     error
+	secrets         []string
+	secretsErr      error
+	exists          bool
+	existsErr       error
+	summary         []string
+	summaryErr      error
 
 	setComponentsErr error
 	validateErr      error
@@ -71,6 +73,10 @@ func (f *fakeBackend) ChartVersions() ([]api.HelmChartVersion, error) {
 }
 
 func (f *fakeBackend) CurrentKubeContext() (string, error) {
+	if f.discoveryGate != nil {
+		<-f.discoveryGate
+	}
+
 	return f.currentContext, f.currentContextErr
 }
 

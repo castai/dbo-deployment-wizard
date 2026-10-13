@@ -133,3 +133,33 @@ func TestReview_DiscoveryRunsOnce(t *testing.T) {
 	r.Equal("kind-b", b.kubeContext)
 	r.Contains(h.m.View().Content, "Installing new Helm deployment: castai-dbo")
 }
+
+// TestReview_DiscoveryLandsWhileSectionOpen: a section opened before
+// discovery answers must not lose the answer — the hub keeps
+// receiving background results while a section is active.
+func TestReview_DiscoveryLandsWhileSectionOpen(t *testing.T) {
+	r := require.New(t)
+	b := newFakeBackend()
+	b.kubeContext, b.chartVersion, b.currentContext = "", "", "kind-z"
+	b.discoveryGate = make(chan struct{})
+	t.Cleanup(func() { close(b.discoveryGate) })
+	h := newHarness(t, b)
+	r.True(h.m.review.defaults.loading())
+
+	h.enterSection(screenNamespace)
+	r.IsType(&formScreen{}, h.m.active)
+	h.send(asyncResultMsg[discovery]{
+		value: discovery{kubeContext: "kind-z", latestVersion: "1.1.0"},
+		fetch: h.m.review.defaults.fetch,
+	})
+	r.False(h.m.review.defaults.loading())
+	r.Equal("kind-z", b.kubeContext)
+	r.Equal("1.1.0", b.chartVersion)
+
+	h.press(tea.KeyEsc)
+	r.True(h.onReview())
+	view := h.m.View().Content
+	r.NotContains(view, reviewTitleDiscovering)
+	r.Contains(view, "Installing new Helm deployment: castai-dbo")
+	r.Contains(view, "1.1.0 (latest)")
+}
