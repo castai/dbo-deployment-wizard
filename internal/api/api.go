@@ -26,8 +26,8 @@ type Backend interface {
 	// LatestChartVersion returns "" when the repo lookup failed.
 	LatestChartVersion() string
 	// Secrets returns the Secret names in the selected context and
-	// namespace; a discovery failure returns none.
-	Secrets() []string
+	// namespace, or the discovery failure.
+	Secrets() ([]string, error)
 	// DeploymentExists reports whether the committed deployment
 	// coordinates — context, namespace, release name — already hold a
 	// helm release, i.e. whether Install would upgrade it rather

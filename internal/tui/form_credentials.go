@@ -1,83 +1,87 @@
 package tui
 
 import (
+	"sync"
+
 	"charm.land/huh/v2"
 	"github.com/samber/lo"
 
 	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
 
+const (
+	credsModeSecret = "secret"
+	credsModeUser   = "user"
+)
+
+// manualSecretLabel is the secret picker's option whose empty value
+// reveals the free-text secret name input.
+const manualSecretLabel = "Enter a name manually…"
+
 // newCredsForm builds the multi-step credentials form: the source
 // select, then the picked source's fields revealed via the group hide
 // funcs. The secret picker loads its options through huh's dynamic
 // options: discovery runs asynchronously with a spinner while the
 // existing-Secret group is active, so a slow cluster never blocks the
-// form and the username/password path never triggers it; an empty
-// discovery hides the picker and shows a free-text name input instead.
+// form and the username/password path never triggers it. Picking the
+// manual option reveals a free-text name input instead.
 // The fields carry no required-validation — huh blocks group
 // navigation while a group has errors, which would trap the user in
 // the username/password step; completeness is enforced by the review
 // screen's Continue gate instead.
 func newCredsForm(b api.Backend, initial api.Credentials, title string, set func(api.Credentials)) formSpec {
 	creds := &initial
-	const modeSecret = "secret"
-	const modeUser = "user"
+	namespace := b.Namespace()
+	// Captured here: the options func runs off the UI goroutine, which
+	// owns the bound creds.
+	currentSecret := creds.SecretName
 
-	pickedSecretMode := lo.Ternary(creds.SecretName != "" || creds.Username == "", modeSecret, modeUser)
-	modePtr := lo.ToPtr(pickedSecretMode)
+	pickedMode := lo.Ternary(creds.SecretName != "" || creds.Username == "", credsModeSecret, credsModeUser)
+	mode := pickedMode
 
-	fallbackToManualEdit := false
+	// Options and description evaluate on huh's command goroutines; the
+	// Once shares one discovery between them.
+	discover := sync.OnceValues(b.Secrets)
 
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title(title).
 				Options(
-					huh.NewOption("Existing Kubernetes Secret", modeSecret).Selected(pickedSecretMode == modeSecret),
-					huh.NewOption("Username and password", modeUser).Selected(pickedSecretMode == modeSecret),
+					huh.NewOption("Existing Kubernetes Secret", credsModeSecret).Selected(pickedMode == credsModeSecret),
+					huh.NewOption("Username and password", credsModeUser).Selected(pickedMode == credsModeUser),
 				).
-				Value(modePtr),
+				Value(&mode),
 		),
 
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title(title).
-				Description("Pick from existing secrets in namespace "+b.Namespace()).
+				DescriptionFunc(func() string {
+					secrets, err := discover()
+
+					return secretsDescription(secrets, err, namespace)
+				}, pickedMode).
 				OptionsFunc(func() []huh.Option[string] {
-					secrets := b.Secrets()
-					fallbackToManualEdit = len(secrets) == 0
+					secrets, err := discover()
 
-					if fallbackToManualEdit {
-						return []huh.Option[string]{
-							huh.NewOption("No secrets found, continue to enter key manually...", "").Selected(true),
-						}
-					}
-
-					return lo.Map(secrets, func(s string, _ int) huh.Option[string] {
-						return huh.NewOption(s, s).Selected(s == creds.SecretName)
-					})
-				}, pickedSecretMode).
+					return secretOptions(secrets, err, currentSecret)
+				}, pickedMode).
 				Height(10).
 				Value(&creds.SecretName),
 		).
 			WithHideFunc(func() bool {
-				if *modePtr != modeSecret || fallbackToManualEdit {
-					return true
-				}
-				creds.Password = ""
-				creds.Username = ""
-
-				return false
+				return mode != credsModeSecret
 			}),
 
 		huh.NewGroup(
 			huh.NewInput().
-				Title("Enter existing secret name. Must exist in namespace "+b.Namespace()).
+				Title("Enter existing secret name. Must exist in namespace "+namespace).
 				Value(&creds.SecretName),
 		).
 			Title(title).
 			WithHideFunc(func() bool {
-				return *modePtr != modeSecret || !fallbackToManualEdit
+				return mode != credsModeSecret || creds.SecretName != ""
 			}),
 
 		huh.NewGroup(
@@ -91,22 +95,58 @@ func newCredsForm(b api.Backend, initial api.Credentials, title string, set func
 		).
 			Title(title).
 			WithHideFunc(func() bool {
-				if *modePtr != modeUser {
-					return true
-				}
-				creds.SecretName = ""
-
-				return false
+				return mode != credsModeUser
 			}),
 	)
 
 	return formSpec{
 		form: form,
 		commit: func() error {
-			set(*creds)
+			set(credsForMode(*creds, mode))
 
 			return nil
 		},
+	}
+}
+
+// credsForMode keeps only the picked source's fields.
+func credsForMode(creds api.Credentials, mode string) api.Credentials {
+	if mode == credsModeUser {
+		creds.SecretName = ""
+	} else {
+		creds.Username, creds.Password = "", ""
+	}
+
+	return creds
+}
+
+// secretOptions lists the discovered secrets plus the manual-entry
+// option: first when there is nothing to pick, last otherwise. The
+// cursor lands on current, else on the first secret for an empty
+// current, else on the manual option.
+func secretOptions(secrets []string, err error, current string) []huh.Option[string] {
+	manual := huh.NewOption(manualSecretLabel, "").Selected(true)
+	if err != nil || len(secrets) == 0 {
+		return []huh.Option[string]{manual}
+	}
+
+	options := lo.Map(secrets, func(s string, i int) huh.Option[string] {
+		return huh.NewOption(s, s).Selected(s == current || (current == "" && i == 0))
+	})
+
+	return append(options, manual)
+}
+
+// secretsDescription explains what the secret picker offers, including
+// why discovery came back empty.
+func secretsDescription(secrets []string, err error, namespace string) string {
+	switch {
+	case err != nil:
+		return "Could not list secrets: " + err.Error()
+	case len(secrets) == 0:
+		return "No secrets found in namespace " + namespace
+	default:
+		return "Pick from existing secrets in namespace " + namespace
 	}
 }
 

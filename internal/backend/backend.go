@@ -94,15 +94,9 @@ func (w *Wizard) ChartVersions() ([]api.HelmChartVersion, error) {
 func (w *Wizard) LatestChartVersion() string { return w.latestVersion }
 
 // Secrets returns the names of the Secrets in the currently selected
-// context and namespace; a discovery failure returns none (the UI
-// falls back to free-text input).
-func (w *Wizard) Secrets() []string {
-	secrets, err := w.k.ListSecrets(w.ctx, w.cfg.KubeContext, w.cfg.Namespace)
-	if err != nil {
-		return nil
-	}
-
-	return secrets
+// context and namespace.
+func (w *Wizard) Secrets() ([]string, error) {
+	return w.k.ListSecrets(w.ctx, w.cfg.KubeContext, w.cfg.Namespace)
 }
 
 // DeploymentExists reports whether the committed deployment
