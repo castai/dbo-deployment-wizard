@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -103,6 +104,11 @@ func TestComponentsShownByDisplayName(t *testing.T) {
 				r.Contains(review, want)
 			}
 			r.NotContains(review, "db-agent")
+			r.Less(strings.Index(review, "Chart version:"), strings.Index(review, "Components:"))
+			if len(tt.components) > 0 {
+				r.Less(strings.Index(review, "Components:"), strings.Index(review, "Performance Advisor credentials:"))
+				r.Less(strings.Index(review, "Performance Advisor credentials:"), strings.Index(review, "Connection Pooling credentials:"))
+			}
 
 			h.enterSection(screenComponents)
 			form := h.m.View().Content

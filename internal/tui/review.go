@@ -249,6 +249,16 @@ func reviewItems(b api.Backend, s rowState) []list.Item {
 		version,
 	}
 
+	components := reviewItem{
+		label:  "Components:",
+		value:  emptyDash(componentNameList(b.Components())),
+		target: screenComponents,
+	}
+	if len(b.Components()) == 0 {
+		components.sub, components.subWarn = requiredSub, true
+	}
+	rows = append(rows, components)
+
 	// Each credentials row exists only while its component is enabled.
 	if slices.Contains(b.Components(), api.ComponentDBAgent) {
 		row := reviewItem{
@@ -259,16 +269,6 @@ func reviewItems(b api.Backend, s rowState) []list.Item {
 		row.sub, row.subWarn = credsSub(agentCreds)
 		rows = append(rows, row)
 	}
-
-	components := reviewItem{
-		label:  "Components:",
-		value:  emptyDash(componentNameList(b.Components())),
-		target: screenComponents,
-	}
-	if len(b.Components()) == 0 {
-		components.sub, components.subWarn = requiredSub, true
-	}
-	rows = append(rows, components)
 
 	if slices.Contains(b.Components(), api.ComponentPooling) {
 		row := reviewItem{
@@ -360,8 +360,8 @@ func (r *reviewModel) sync() {
 	}
 	r.list.SetHeight(h)
 
-	// The list keeps the cursor's index, but the agent row above
-	// "Components" comes and goes — follow the row instead.
+	// The list keeps the cursor's index, but the credentials rows come
+	// and go — follow the row instead.
 	_, i, found := lo.FindIndexOf(items, func(it list.Item) bool {
 		ri, ok := it.(reviewItem)
 
