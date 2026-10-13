@@ -6,7 +6,7 @@ import (
 )
 
 // simulateSlowNetworkDelay is the per-call delay the --slow-network
-// flag injects, to exercise the UI against a slow network locally.
+// flag injects, to simulate a slow network locally.
 const simulateSlowNetworkDelay = 2 * time.Second
 
 // sleepCtx pauses for d, or until ctx is canceled.

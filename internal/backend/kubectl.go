@@ -29,11 +29,10 @@ type Kubectl interface {
 
 // RealKubectl invokes the kubectl binary on PATH. SimulateSlowNetwork
 // delays every call by simulateSlowNetworkDelay — the --slow-network
-// UI testing aid.
+// testing aid.
 type RealKubectl struct {
 	// releaseCache memoizes HelmReleaseExists results by release
-	// coordinates; the UI re-checks on every review and confirm entry,
-	// from background commands.
+	// coordinates, so repeated checks of one release shell out once.
 	releaseCache syncCache[releaseKey, releaseLookup]
 
 	probe contextProbe
@@ -196,7 +195,7 @@ var ErrClusterUnreachable = errors.New("kubernetes cluster unreachable")
 // reachable probes kubeContext with a single request and remembers the
 // verdict until another context is asked about: an unreachable cluster
 // costs one connectTimeout, not one per call, and is not retried until
-// the user picks a different context.
+// a different context is asked about.
 func (k *RealKubectl) reachable(ctx context.Context, kubeContext string) error {
 	p := &k.probe
 	p.mu.Lock()

@@ -11,9 +11,9 @@ import (
 	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
 
-// Config is every user-supplied deployment parameter, from the CLI's
-// flags to the TUI's commits; the helm install generator is one of
-// its consumers.
+// Config is every deployment parameter, from the CLI's flags to the
+// Backend commands; the helm install generator is one of its
+// consumers.
 type Config struct {
 	ReleaseName  string
 	ChartName    string
@@ -40,13 +40,13 @@ type Config struct {
 	DryRun bool
 
 	// SimulateSlowNetwork delays every networked call by a fixed 2s —
-	// a local UI-testing aid, not a deployment parameter.
+	// a local testing aid, not a deployment parameter.
 	SimulateSlowNetwork bool
 }
 
 // Static defaults; the discovery-based fields (KubeContext,
-// ChartVersion) are filled by the UI through the backend's discovery
-// queries.
+// ChartVersion) are left for the caller to fill from
+// CurrentKubeContext and LatestChartVersion.
 const (
 	defaultAPIBaseURL  = "https://api.cast.ai"
 	defaultChartName   = "castai-dbo"

@@ -95,7 +95,8 @@ func Install(ctx context.Context, values helmValues, cfg Config, shell ProcessRu
 		return fmt.Errorf("render helm values: %w", err)
 	}
 
-	// A blank line hands off from the TUI's last frame.
+	// A blank line separates the transcript from whatever preceded it
+	// on the terminal.
 	fmt.Fprintln(stdout)
 	fmt.Fprintf(stdout, "Installing helm chart %s:%s as '%s/%s'\n",
 		cfg.ChartName, cfg.ChartVersion, cfg.Namespace, cfg.ReleaseName)

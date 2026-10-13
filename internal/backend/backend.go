@@ -96,8 +96,7 @@ func (w *Wizard) DeploymentExists() (bool, error) {
 
 // SummarizeInstallationImpact lists the actions the install will
 // perform: the Helm deployment it creates or updates, and every
-// Secret it creates or updates; the confirmation screen renders the
-// lines verbatim.
+// Secret it creates or updates.
 func (w *Wizard) SummarizeInstallationImpact() ([]string, error) {
 	exists, err := w.DeploymentExists()
 	if err != nil {
@@ -176,8 +175,7 @@ func credentialsWithPrecedence(c api.Credentials) api.Credentials {
 	return c
 }
 
-// Validate reports every unmet install prerequisite; the review
-// screen gates its Continue action on it.
+// Validate reports every unmet install prerequisite.
 func (w *Wizard) Validate() error { return w.cfg.validate() }
 
 // Install runs the helm chart install and then watches the release's
@@ -278,6 +276,6 @@ func (w *Wizard) secretName(component string) string {
 	return w.cfg.ReleaseName + "-" + component + "-credentials"
 }
 
-// Shutdown releases anything the wizard holds; the cmd entry calls it
-// after the UI returns. The v1 wizard holds nothing.
+// Shutdown releases anything the wizard holds; callers invoke it once
+// they are done with the wizard. The v1 wizard holds nothing.
 func (w *Wizard) Shutdown() {}

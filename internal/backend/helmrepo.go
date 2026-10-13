@@ -26,7 +26,7 @@ const (
 
 // HelmRepoClient fetches and caches a Helm chart repository index.
 // simulateSlowNetwork delays every index fetch by
-// simulateSlowNetworkDelay — the --slow-network UI testing aid.
+// simulateSlowNetworkDelay — the --slow-network testing aid.
 type HelmRepoClient struct {
 	httpClient          *http.Client
 	indexURL            string

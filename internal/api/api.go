@@ -52,10 +52,8 @@ type Backend interface {
 
 	// --- actions ---
 
-	// Validate reports every unmet install prerequisite (the
-	// enabled components' credentials, the target namespace) as one
-	// error; nil means the configuration is ready to install. The
-	// review screen gates its Continue action on it.
+	// Validate reports every unmet install prerequisite as one
+	// error; nil means the configuration is ready to install.
 	Validate() error
 	// Install runs the install, writing the CLI transcript to stdout;
 	// DryRun prints the commands instead of executing.
