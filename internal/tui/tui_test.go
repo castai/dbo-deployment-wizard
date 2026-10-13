@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/stretchr/testify/require"
@@ -234,4 +235,13 @@ func TestReview_DeploymentLookupError(t *testing.T) {
 
 	r.Equal(b.existsErr, h.m.review.release.err)
 	r.Contains(h.m.View().Content, "helm: cluster unreachable")
+}
+
+func TestReview_SlashDoesNotFilter(t *testing.T) {
+	r := require.New(t)
+	h := newHarness(t, newFakeBackend())
+
+	h.typeText("/")
+
+	r.Equal(list.Unfiltered, h.m.review.list.FilterState())
 }

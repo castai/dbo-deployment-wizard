@@ -243,13 +243,15 @@ func reviewItems(b api.Backend, reviewErr string) []list.Item {
 }
 
 // newItemList builds an item list with the wizard's shared chrome:
-// no title, status bar, or help, and no quit bindings.
+// no title, status bar, help, filtering, or quit bindings.
 func newItemList(styles *huh.Styles, isDark bool) list.Model {
 	l := list.New(nil, newReviewDelegate(styles, isDark), 80, 14)
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
 	l.SetShowTitle(false)
 	l.DisableQuitKeybindings()
+	// The list's own filter would claim Esc, which quits the wizard here.
+	l.SetFilteringEnabled(false)
 	l.InfiniteScrolling = true
 
 	return l
