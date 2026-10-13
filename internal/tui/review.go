@@ -149,7 +149,7 @@ const requiredSub = "⚠ required"
 const maskedPasswordMax = 16
 
 func maskPassword(pw string) string {
-	return strings.Repeat("•", max(len(pw), maskedPasswordMax))
+	return strings.Repeat("•", min(len(pw), maskedPasswordMax))
 }
 
 func emptyDash(s string) string {
