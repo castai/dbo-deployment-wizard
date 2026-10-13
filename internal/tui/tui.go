@@ -22,8 +22,9 @@ import (
 var ErrAborted = errors.New("install aborted")
 
 // Model is the bubbletea model: the screen router. It holds exactly
-// one active screen, routes every message to it, and carries out the
-// navigation the screens ask for through messages.
+// one active screen, routes keys to it and everything else to it and
+// the review hub, and carries out the navigation the screens ask for
+// through messages.
 type Model struct {
 	// backend is the service-layer contract: the single owner of the
 	// committed configuration.
@@ -134,6 +135,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.active, cmd = m.active.Update(msg)
+
+	// Keys go to the active screen only, but the review hub outlives
+	// the sections: its background results and spinner ticks must reach
+	// it while one is open, or a lookup finishing meanwhile is lost.
+	if _, isKey := msg.(tea.KeyPressMsg); !isKey && m.active != screen(m.review) {
+		_, hubCmd := m.review.Update(msg)
+		cmd = tea.Batch(cmd, hubCmd)
+	}
 
 	return m, cmd
 }
