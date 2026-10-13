@@ -151,9 +151,9 @@ func secretsDescription(secrets []string, err error, namespace string) string {
 }
 
 func newAgentCredsForm(b api.Backend) formSpec {
-	return newCredsForm(b, b.AgentCredentials(), "Agent credentials", b.SetAgentCredentials)
+	return newCredsForm(b, b.AgentCredentials(), componentName(api.ComponentDBAgent)+" credentials", b.SetAgentCredentials)
 }
 
 func newPoolingCredsForm(b api.Backend) formSpec {
-	return newCredsForm(b, b.PoolingCredentials(), "Pooling credentials", b.SetPoolingCredentials)
+	return newCredsForm(b, b.PoolingCredentials(), componentName(api.ComponentPooling)+" credentials", b.SetPoolingCredentials)
 }

@@ -163,6 +163,9 @@ func (c *Config) validate() error {
 	if c.ChartVersion == "" {
 		errs = append(errs, errors.New("chart version is required"))
 	}
+	if len(c.Components) == 0 {
+		errs = append(errs, errors.New("at least one component is required"))
+	}
 	if c.HasComponent(api.ComponentDBAgent) && !c.AgentCreds.Provided() {
 		errs = append(errs, errors.New("agent credentials are required"))
 	}

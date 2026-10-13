@@ -89,7 +89,7 @@ func (d reviewDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 
 		return
 	}
-	value := truncate(ri.value, 48)
+	value := truncate(ri.value, 60)
 	if index == m.Index() {
 		row := d.theme.Focused.Title.Render(ri.label) + " " +
 			d.theme.Focused.SelectedOption.Render(value)
@@ -252,7 +252,7 @@ func reviewItems(b api.Backend, s rowState) []list.Item {
 	// Each credentials row exists only while its component is enabled.
 	if slices.Contains(b.Components(), api.ComponentDBAgent) {
 		row := reviewItem{
-			label:  "Agent credentials:",
+			label:  componentName(api.ComponentDBAgent) + " credentials:",
 			value:  credsSummary(agentCreds),
 			target: screenAgentCreds,
 		}
@@ -260,15 +260,19 @@ func reviewItems(b api.Backend, s rowState) []list.Item {
 		rows = append(rows, row)
 	}
 
-	rows = append(rows, reviewItem{
-		label:  "Components to install:",
-		value:  emptyDash(strings.Join(b.Components(), ", ")),
+	components := reviewItem{
+		label:  "Components:",
+		value:  emptyDash(componentNameList(b.Components())),
 		target: screenComponents,
-	})
+	}
+	if len(b.Components()) == 0 {
+		components.sub, components.subWarn = requiredSub, true
+	}
+	rows = append(rows, components)
 
 	if slices.Contains(b.Components(), api.ComponentPooling) {
 		row := reviewItem{
-			label:  "Pooling credentials:",
+			label:  componentName(api.ComponentPooling) + " credentials:",
 			value:  credsSummary(pooling),
 			target: screenPoolingCreds,
 		}

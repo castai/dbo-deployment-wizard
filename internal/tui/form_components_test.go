@@ -46,3 +46,70 @@ func TestReconcileComponents_DoesNotMutateInput(t *testing.T) {
 
 	r.Equal([]string{api.ComponentDBAgent, api.ComponentPooling}, sel)
 }
+
+func TestComponentName(t *testing.T) {
+	tests := map[string]struct {
+		component string
+		want      string
+	}{
+		"db-agent": {component: api.ComponentDBAgent, want: "Performance Advisor"},
+		"db-proxy": {component: api.ComponentDBProxy, want: "Database Proxy"},
+		"pooling":  {component: api.ComponentPooling, want: "Connection Pooling"},
+		"unknown":  {component: "db-optimizer", want: "db-optimizer"},
+		"empty":    {component: "", want: ""},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := require.New(t)
+			r.Equal(tt.want, componentName(tt.component))
+		})
+	}
+	r := require.New(t)
+	for _, c := range api.AllComponents {
+		r.Contains(componentNames, c, "component %q has no display name", c)
+	}
+}
+
+func TestComponentsShownByDisplayName(t *testing.T) {
+	tests := map[string]struct {
+		components []string
+		wantReview []string
+		wantForm   []string
+	}{
+		"all selected": {
+			components: api.AllComponents,
+			wantReview: []string{
+				"Components: Performance Advisor, Database Proxy, Connection Pooling",
+				"Performance Advisor credentials:",
+				"Connection Pooling credentials:",
+			},
+			wantForm: []string{"Performance Advisor", "Database Proxy", "Connection Pooling", "Connection Pooling requires Database Proxy"},
+		},
+		"none selected is marked required": {
+			components: nil,
+			wantReview: []string{"Components: " + unsetPlaceholder, requiredSub},
+			wantForm:   []string{"Performance Advisor"},
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := require.New(t)
+			b := newFakeBackend()
+			b.components = tt.components
+			h := newHarness(t, b)
+
+			review := h.m.View().Content
+			for _, want := range tt.wantReview {
+				r.Contains(review, want)
+			}
+			r.NotContains(review, "db-agent")
+
+			h.enterSection(screenComponents)
+			form := h.m.View().Content
+			for _, want := range tt.wantForm {
+				r.Contains(form, want)
+			}
+			r.NotContains(form, "db-proxy")
+		})
+	}
+}

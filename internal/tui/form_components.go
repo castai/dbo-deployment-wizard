@@ -38,14 +38,15 @@ func newComponentsForm(b api.Backend) formSpec {
 // single visible row.
 func componentsForm(selected *[]string) *huh.Form {
 	options := lo.Map(api.AllComponents, func(c string, _ int) huh.Option[string] {
-		return huh.NewOption(c, c).Selected(slices.Contains(*selected, c))
+		return huh.NewOption(componentName(c), c).Selected(slices.Contains(*selected, c))
 	})
 
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
 				Title("Components").
-				Description("Chart subcharts to install; pooling requires db-proxy.").
+				Description("Components to install; " + componentName(api.ComponentPooling) +
+					" requires " + componentName(api.ComponentDBProxy) + ".").
 				Options(options...).
 				Value(selected).
 				Height(len(api.AllComponents) + 3),
