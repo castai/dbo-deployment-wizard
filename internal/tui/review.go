@@ -28,7 +28,7 @@ type reviewItem struct {
 	// err is the Continue item's validation message, rendered
 	// above the button.
 	err    string
-	target screen
+	target screenID
 	action bool
 }
 
@@ -185,7 +185,7 @@ const reviewTitleLoading = "Checking for an existing Helm deployment…"
 // identifies which lookup it answers.
 type reviewTitleMsg struct {
 	title string
-	fetch int
+	fetch int64
 }
 
 // reviewTitle renders the review screen's title; the suffix names
@@ -254,9 +254,6 @@ func reviewItems(b api.Backend, reviewErr string) []list.Item {
 	return lo.Map(rows, func(r reviewItem, _ int) list.Item { return r })
 }
 
-// handleReview and handleConfirm moved to the root model (tui.go);
-// the screen state lives in reviewModel below.
-
 // newItemList builds an item list with the wizard's shared chrome:
 // no title, status bar, or help, and no quit bindings.
 func newItemList(styles *huh.Styles, isDark bool) list.Model {
@@ -270,10 +267,9 @@ func newItemList(styles *huh.Styles, isDark bool) list.Model {
 	return l
 }
 
-// reviewModel is the review screen's sub-model: the configuration hub
-// list with the Continue action. It owns the list, the validation
-// message riding Continue, and the screen's rendering; the root model
-// routes keys in and carries out the navigation it asks for.
+// reviewModel is the review screen: the configuration hub list with
+// the Continue action. It owns the list, the validation message riding
+// Continue, and the screen's rendering.
 type reviewModel struct {
 	backend api.Backend
 	styles  *huh.Styles
@@ -289,7 +285,7 @@ type reviewModel struct {
 	// responses drop.
 	title   string
 	loading bool
-	fetch   int
+	fetch   int64
 	spinner spinner.Model
 }
 
@@ -337,18 +333,21 @@ func (r *reviewModel) sync() {
 	}
 }
 
-// backToReview resets the rows for re-entry from a sub-screen; the
-// validation message clears — the edit may have fixed it.
-func (r *reviewModel) backToReview() {
+// Init resets the rows for (re-)entry and re-checks the release: the
+// edit may have fixed the validation message or changed the release
+// coordinates.
+func (r *reviewModel) Init() tea.Cmd {
 	r.reviewError = ""
 	r.sync()
+
+	return r.load()
 }
 
 // load defers the release lookup to a background command: it shells
 // out to helm, which run from view froze the UI — Ctrl+C included.
 func (r *reviewModel) load() tea.Cmd {
 	r.loading = true
-	r.fetch++
+	r.fetch = nextFetch()
 	b, fetch := r.backend, r.fetch
 
 	return tea.Batch(r.spinner.Tick, func() tea.Msg {
@@ -377,36 +376,51 @@ func (r *reviewModel) setTitle(msg reviewTitleMsg) {
 	r.title = msg.title
 }
 
-// update routes the review screen's keys; the second return names the
-// screen to navigate to, screenReview to stay.
-func (r *reviewModel) update(msg tea.KeyPressMsg) (tea.Cmd, screen) {
-	if isConfirmAction(msg) {
-		if it, ok := r.list.SelectedItem().(reviewItem); ok {
-			if it.action {
-				if err := r.backend.Validate(); err != nil {
-					r.reviewError = err.Error()
-					r.sync()
-
-					return nil, screenReview
-				}
-
-				return nil, screenConfirm
-			}
-
-			return nil, it.target
-		}
-
-		return nil, screenReview
+//nolint:ireturn // screen.Update returns the next screen.
+func (r *reviewModel) Update(msg tea.Msg) (screen, tea.Cmd) {
+	switch msg := msg.(type) {
+	case reviewTitleMsg:
+		r.setTitle(msg)
+	case spinner.TickMsg:
+		return r, r.tick(msg)
+	case tea.KeyPressMsg:
+		return r, r.handleKey(msg)
 	}
 
-	var cmd tea.Cmd
-	r.list, cmd = r.list.Update(msg)
+	return r, nil
+}
 
-	return cmd, screenReview
+// handleKey: Esc quits, Enter enters the selected section or — from
+// Continue, once Validate passes — moves on to confirmation.
+func (r *reviewModel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	if isEsc(msg) {
+		return send(abortMsg{})
+	}
+	if !isConfirmAction(msg) {
+		var cmd tea.Cmd
+		r.list, cmd = r.list.Update(msg)
+
+		return cmd
+	}
+	it, ok := r.list.SelectedItem().(reviewItem)
+	switch {
+	case !ok:
+		return nil
+	case !it.action:
+		return navigate(it.target)
+	}
+	if err := r.backend.Validate(); err != nil {
+		r.reviewError = err.Error()
+		r.sync()
+
+		return nil
+	}
+
+	return navigate(screenConfirm)
 }
 
 // view renders the whole screen: title, rows, help footer.
-func (r *reviewModel) view() string {
+func (r *reviewModel) View() string {
 	title := r.title
 	if r.loading {
 		title = r.spinner.View() + " " + reviewTitleLoading

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/samber/lo"
 
@@ -19,16 +18,17 @@ import (
 // navigation while a group has errors, which would trap the user in
 // the username/password step; completeness is enforced by the review
 // screen's Continue gate instead.
-func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title string) *huh.Form {
+func newCredsForm(b api.Backend, initial api.Credentials, title string, set func(api.Credentials)) formSpec {
+	creds := &initial
 	const modeSecret = "secret"
 	const modeUser = "user"
 
-	pickedSecretMode := lo.Ternary(creds == nil || creds.SecretName != "" || creds.Username == "", modeSecret, modeUser)
+	pickedSecretMode := lo.Ternary(creds.SecretName != "" || creds.Username == "", modeSecret, modeUser)
 	modePtr := lo.ToPtr(pickedSecretMode)
 
 	fallbackToManualEdit := false
 
-	return huh.NewForm(
+	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title(title).
@@ -98,27 +98,22 @@ func newCredsForm(theme huh.Theme, b api.Backend, creds *api.Credentials, title 
 
 				return false
 			}),
-	).WithTheme(theme)
+	)
+
+	return formSpec{
+		form: form,
+		commit: func() error {
+			set(*creds)
+
+			return nil
+		},
+	}
 }
 
-func (m *Model) handleAgentCreds(msg tea.KeyPressMsg) tea.Cmd {
-	cmd, done := forwardToForm(&m.agentCredsForm, msg)
-	if done {
-		m.completeForm()
-	}
-
-	return cmd
+func newAgentCredsForm(b api.Backend) formSpec {
+	return newCredsForm(b, b.AgentCredentials(), "Agent credentials", b.SetAgentCredentials)
 }
 
-func (m *Model) handlePoolingCreds(msg tea.KeyPressMsg) tea.Cmd {
-	f := m.activeForm()
-	if f == nil {
-		return nil
-	}
-	cmd, done := forwardToForm(f, msg)
-	if done {
-		m.completeForm()
-	}
-
-	return cmd
+func newPoolingCredsForm(b api.Backend) formSpec {
+	return newCredsForm(b, b.PoolingCredentials(), "Pooling credentials", b.SetPoolingCredentials)
 }

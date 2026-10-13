@@ -12,7 +12,7 @@ import (
 	"github.com/castai/dbo-deployment-wizard/internal/api"
 )
 
-// confirmModel is the confirmation screen's sub-model: the
+// confirmModel is the confirmation screen: the
 // installation-impact summary and the Apply action. A background
 // command loads the summary; Enter is gated until it lands, so a
 // double-click from review can never apply unseen.
@@ -25,7 +25,7 @@ type confirmModel struct {
 	spinner spinner.Model
 
 	// fetch stamps each entry so stale responses drop.
-	fetch int
+	fetch int64
 }
 
 func newConfirmModel(b api.Backend, styles *huh.Styles) *confirmModel {
@@ -37,16 +37,15 @@ func newConfirmModel(b api.Backend, styles *huh.Styles) *confirmModel {
 type confirmSummaryMsg struct {
 	lines []string
 	err   error
-	fetch int
+	fetch int64
 }
 
-// enter resets the screen and defers the summary to a background
-// command so entering is instant; the fetch stamp lets update drop
-// responses superseded by a newer entry.
-func (c *confirmModel) enter() tea.Cmd {
+// Init defers the summary to a background command so entering is
+// instant; the fetch stamp drops responses superseded by a newer entry.
+func (c *confirmModel) Init() tea.Cmd {
 	c.loading = true
 	c.lines, c.err = nil, nil
-	c.fetch++
+	c.fetch = nextFetch()
 	b, fetch := c.backend, c.fetch
 
 	return tea.Batch(c.spinner.Tick, func() tea.Msg {
@@ -67,9 +66,39 @@ func (c *confirmModel) tick(msg spinner.TickMsg) tea.Cmd {
 	return cmd
 }
 
-// update applies a deferred summary, dropping responses a newer entry
-// has superseded.
-func (c *confirmModel) update(msg confirmSummaryMsg) {
+//nolint:ireturn // screen.Update returns the next screen.
+func (c *confirmModel) Update(msg tea.Msg) (screen, tea.Cmd) {
+	switch msg := msg.(type) {
+	case confirmSummaryMsg:
+		c.setSummary(msg)
+	case spinner.TickMsg:
+		return c, c.tick(msg)
+	case tea.KeyPressMsg:
+		return c, c.handleKey(msg)
+	}
+
+	return c, nil
+}
+
+// handleKey: Enter applies once the summary has loaded — the program
+// quits and the install continues in plain CLI mode. Enter while
+// loading does nothing, so a double-click through from review can
+// never apply a summary the user has not seen; nor does it when the
+// summary failed.
+func (c *confirmModel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	switch {
+	case isEsc(msg):
+		return navigate(screenReview)
+	case isConfirmAction(msg) && c.ready():
+		return send(applyMsg{})
+	}
+
+	return nil
+}
+
+// setSummary applies a deferred summary, dropping responses a newer
+// entry has superseded.
+func (c *confirmModel) setSummary(msg confirmSummaryMsg) {
 	if msg.fetch != c.fetch {
 		return
 	}
@@ -86,7 +115,7 @@ func (c *confirmModel) ready() bool {
 
 // view renders the whole screen: title, summary, Apply button, help
 // footer.
-func (c *confirmModel) view() string {
+func (c *confirmModel) View() string {
 	// The blank lines mirror the review screen's list padding.
 	var body strings.Builder
 	fmt.Fprintln(&body)
