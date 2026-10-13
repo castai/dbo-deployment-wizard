@@ -29,8 +29,6 @@ type Wizard struct {
 	shell ProcessRunner
 
 	cfg Config
-
-	latestVersion string
 }
 
 func (w *Wizard) ReleaseName() string {
@@ -40,33 +38,17 @@ func (w *Wizard) ReleaseName() string {
 // Compile-time check: Wizard implements the full Backend contract.
 var _ api.Backend = (*Wizard)(nil)
 
-// NewWizard implements api.Backend
-func NewWizard(ctx context.Context, cfg Config, repo *HelmRepoClient, k Kubectl, shell ProcessRunner) (*Wizard, error) {
-	w := &Wizard{
+// NewWizard builds the facade over cfg as the CLI left it; the
+// coordinates it left unset are discovered through CurrentKubeContext
+// and LatestChartVersion, so construction never reaches out.
+func NewWizard(ctx context.Context, cfg Config, repo *HelmRepoClient, k Kubectl, shell ProcessRunner) *Wizard {
+	return &Wizard{
 		ctx:   ctx,
 		repo:  repo,
 		k:     k,
 		shell: shell,
 		cfg:   cfg,
 	}
-
-	if w.cfg.KubeContext == "" {
-		if cur, err := k.CurrentKubeContext(ctx); err == nil && cur != "" {
-			w.cfg.KubeContext = cur
-		} else {
-			return nil, fmt.Errorf("could not determine current kubernetes context: %w", err)
-		}
-	}
-
-	if w.cfg.ChartVersion == "" && w.cfg.ChartName != "" {
-		latest, err := repo.LatestVersion(ctx, cfg.ChartName)
-		if err != nil {
-			return nil, fmt.Errorf("fetch latest chart version: %w", err)
-		}
-		w.cfg.ChartVersion = latest
-	}
-
-	return w, nil
 }
 
 // --- queries ---
@@ -89,9 +71,13 @@ func (w *Wizard) ChartVersions() ([]api.HelmChartVersion, error) {
 	return w.repo.ListVersions(w.ctx, w.cfg.ChartName)
 }
 
-// LatestChartVersion returns the newest published version, or "" when
-// the repo lookup failed.
-func (w *Wizard) LatestChartVersion() string { return w.latestVersion }
+// CurrentKubeContext returns kubectl's current context.
+func (w *Wizard) CurrentKubeContext() (string, error) { return w.k.CurrentKubeContext(w.ctx) }
+
+// LatestChartVersion returns the newest published chart version.
+func (w *Wizard) LatestChartVersion() (string, error) {
+	return w.repo.LatestVersion(w.ctx, w.cfg.ChartName)
+}
 
 // Secrets returns the names of the Secrets in the currently selected
 // context and namespace.

@@ -24,16 +24,19 @@ type fakeBackend struct {
 	poolingCreds api.Credentials
 	components   []string
 
-	kubeContexts    []string
-	kubeContextsErr error
-	versions        []api.HelmChartVersion
-	versionsErr     error
-	secrets         []string
-	secretsErr      error
-	exists          bool
-	existsErr       error
-	summary         []string
-	summaryErr      error
+	currentContext    string
+	currentContextErr error
+	latestErr         error
+	kubeContexts      []string
+	kubeContextsErr   error
+	versions          []api.HelmChartVersion
+	versionsErr       error
+	secrets           []string
+	secretsErr        error
+	exists            bool
+	existsErr         error
+	summary           []string
+	summaryErr        error
 
 	setComponentsErr error
 	validateErr      error
@@ -67,7 +70,17 @@ func (f *fakeBackend) ChartVersions() ([]api.HelmChartVersion, error) {
 	return f.versions, f.versionsErr
 }
 
-func (f *fakeBackend) LatestChartVersion() string { return f.versions[0].Number }
+func (f *fakeBackend) CurrentKubeContext() (string, error) {
+	return f.currentContext, f.currentContextErr
+}
+
+func (f *fakeBackend) LatestChartVersion() (string, error) {
+	if f.latestErr != nil {
+		return "", f.latestErr
+	}
+
+	return f.versions[0].Number, nil
+}
 
 func (f *fakeBackend) Secrets() ([]string, error)              { return f.secrets, f.secretsErr }
 func (f *fakeBackend) DeploymentExists() (bool, error)         { return f.exists, f.existsErr }

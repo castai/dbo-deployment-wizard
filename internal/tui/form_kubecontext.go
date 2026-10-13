@@ -10,8 +10,7 @@ import (
 )
 
 // newKubeContextForm builds the kube-context form over the discovered
-// contexts. NewWizard fails fast on an empty list at startup, but a
-// later lookup can still fail, so the description reports it.
+// contexts; the description reports a failed lookup.
 func newKubeContextForm(b api.Backend) formSpec {
 	kubeContext := b.KubeContext()
 	// Captured here: the options func runs off the UI goroutine, which

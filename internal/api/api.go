@@ -23,8 +23,11 @@ type Backend interface {
 	Components() []string
 	KubeContexts() ([]string, error)
 	ChartVersions() ([]HelmChartVersion, error)
-	// LatestChartVersion returns "" when the repo lookup failed.
-	LatestChartVersion() string
+	// CurrentKubeContext and LatestChartVersion discover the defaults
+	// for the coordinates the CLI left unset. Both reach out (kubectl,
+	// the chart repository), so frontends run them in the background.
+	CurrentKubeContext() (string, error)
+	LatestChartVersion() (string, error)
 	// Secrets returns the Secret names in the selected context and
 	// namespace, or the discovery failure.
 	Secrets() ([]string, error)

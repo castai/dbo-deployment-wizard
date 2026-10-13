@@ -45,7 +45,8 @@ type Config struct {
 }
 
 // Static defaults; the discovery-based fields (KubeContext,
-// ChartVersion) are filled by NewWizard.
+// ChartVersion) are filled by the UI through the backend's discovery
+// queries.
 const (
 	defaultAPIBaseURL  = "https://api.cast.ai"
 	defaultChartName   = "castai-dbo"
@@ -155,6 +156,12 @@ func (c *Config) validate() error {
 	}
 	if c.ChartName == "" {
 		errs = append(errs, errors.New("chart name is required"))
+	}
+	if c.KubeContext == "" {
+		errs = append(errs, errors.New("kubectl context is required"))
+	}
+	if c.ChartVersion == "" {
+		errs = append(errs, errors.New("chart version is required"))
 	}
 	if c.HasComponent(api.ComponentDBAgent) && !c.AgentCreds.Provided() {
 		errs = append(errs, errors.New("agent credentials are required"))

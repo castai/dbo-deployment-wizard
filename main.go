@@ -25,7 +25,7 @@ var errNotATTY = errors.New("this wizard requires a TTY; run it from a terminal 
 
 // newRootCmd defines the CLI surface: every flag binds directly into
 // the default config; RunE normalizes --components through
-// SetComponents, and NewWizard validates the result.
+// SetComponents.
 func newRootCmd() *cobra.Command {
 	cfg := backend.NewDefaultConfig()
 
@@ -111,10 +111,7 @@ func run(ctx context.Context, cfg backend.Config) error {
 	shell := &backend.RealProcessRunner{SimulateSlowNetwork: cfg.SimulateSlowNetwork}
 	k := backend.NewRealKubectl(shell)
 
-	w, err := backend.NewWizard(ctx, cfg, repo, k, shell)
-	if err != nil {
-		return err
-	}
+	w := backend.NewWizard(ctx, cfg, repo, k, shell)
 	defer w.Shutdown()
 
 	return tui.Run(w)
