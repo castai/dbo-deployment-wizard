@@ -284,6 +284,44 @@ func TestNewHelmValues_Cartesian(t *testing.T) {
 	}
 }
 
+// TestRepoBaseURL pins how the repository base URL is derived from
+// the index URL: the trailing index.yaml document, query and
+// fragment drop, and anything that is not an absolute URL errors.
+func TestRepoBaseURL(t *testing.T) {
+	tests := map[string]struct {
+		indexURL string
+		want     string
+		wantErr  bool
+	}{
+		"default castai index":             {indexURL: "https://castai.github.io/helm-charts/index.yaml", want: "https://castai.github.io/helm-charts"},
+		"root index":                       {indexURL: "https://charts.example.com/index.yaml", want: "https://charts.example.com"},
+		"nested path":                      {indexURL: "https://charts.example.com/charts/index.yaml", want: "https://charts.example.com/charts"},
+		"trailing slash after index.yaml":  {indexURL: "https://charts.example.com/index.yaml/", want: "https://charts.example.com"},
+		"already a base URL":               {indexURL: "https://charts.example.com/charts/", want: "https://charts.example.com/charts"},
+		"host-only URL":                    {indexURL: "https://charts.example.com", want: "https://charts.example.com"},
+		"port is preserved":                {indexURL: "https://charts.example.com:8080/index.yaml", want: "https://charts.example.com:8080"},
+		"query and fragment are dropped":   {indexURL: "https://charts.example.com/charts/index.yaml?token=abc#frag", want: "https://charts.example.com/charts"},
+		"percent-encoded path round-trips": {indexURL: "https://charts.example.com/my%20charts/index.yaml", want: "https://charts.example.com/my%20charts"},
+		"relative URL is rejected":         {indexURL: "charts.example.com/index.yaml", wantErr: true},
+		"schemeless URL is rejected":       {indexURL: "//charts.example.com/index.yaml", wantErr: true},
+		"whitespace in URL is rejected":    {indexURL: "https://exa mple.com/index.yaml", wantErr: true},
+		"empty URL is rejected":            {indexURL: "", wantErr: true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := require.New(t)
+
+			got, err := repoBaseURL(tt.indexURL)
+			if tt.wantErr {
+				r.Error(err)
+				return
+			}
+			r.NoError(err)
+			r.Equal(tt.want, got)
+		})
+	}
+}
+
 // TestBuildHelmArgv_Deterministic locks down the exact argv shape:
 // only the release coordinates, every chart parameter over stdin.
 func TestBuildHelmArgv_Deterministic(t *testing.T) {

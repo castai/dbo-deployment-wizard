@@ -22,7 +22,7 @@ type Config struct {
 	ChartVersion string
 
 	// Chart sourcing config, not a helm value.
-	ChartRepo       string
+	ChartRepo      string
 	ChartRepoAlias string
 
 	// AgentCreds are the db-agent's database credentials; PoolingCreds
@@ -64,12 +64,12 @@ const (
 // static field prefilled.
 func NewDefaultConfig() Config {
 	return Config{
-		APIURL:          defaultAPIBaseURL,
-		ChartRepo:       DefaultIndexURL,
-		ChartRepoAlias:  defaultChartRepoAlias,
-		ChartName:        defaultChartName,
-		ReleaseName:      defaultReleaseName,
-		Namespace:        defaultNamespace,
+		APIURL:         defaultAPIBaseURL,
+		ChartRepo:      DefaultIndexURL,
+		ChartRepoAlias: defaultChartRepoAlias,
+		ChartName:      defaultChartName,
+		ReleaseName:    defaultReleaseName,
+		Namespace:      defaultNamespace,
 
 		Components: []string{api.ComponentDBAgent, api.ComponentDBProxy},
 	}

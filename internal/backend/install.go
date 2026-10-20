@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 
 	"al.essio.dev/pkg/shellescape"
@@ -77,10 +78,24 @@ func chartRef(c Config) string {
 }
 
 // repoBaseURL derives the helm repository base URL from the index
-// URL the wizard lists versions from, by stripping its index.yaml.
-func repoBaseURL(indexURL string) string {
-	base := strings.TrimSuffix(indexURL, "index.yaml")
-	return strings.TrimSuffix(base, "/")
+// URL the wizard lists versions from, by dropping a trailing
+// index.yaml document along with any query and fragment.
+func repoBaseURL(indexURL string) (string, error) {
+	u, err := url.Parse(indexURL)
+	if err != nil {
+		return "", fmt.Errorf("parse chart repository URL %q: %w", indexURL, err)
+	}
+	if !u.IsAbs() || u.Host == "" {
+		return "", fmt.Errorf("chart repository URL %q must be an absolute URL with a host", indexURL)
+	}
+
+	u.Path = strings.TrimSuffix(u.Path, "/")
+	u.Path, _ = strings.CutSuffix(u.Path, "/index.yaml")
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment, u.RawFragment = "", ""
+
+	return u.String(), nil
 }
 
 // BuildHelmArgv produces the `helm upgrade --install` argv: only the
@@ -144,9 +159,9 @@ func Install(ctx context.Context, values helmValues, cfg Config, shell ProcessRu
 // so the repo_name/chart reference resolves; --force-update keeps an
 // existing registration fresh. A dry run prints the command instead.
 func ensureRepo(ctx context.Context, cfg Config, shell ProcessRunner, stdout io.Writer) error {
-	base := repoBaseURL(cfg.ChartRepo)
-	if base == "" {
-		return fmt.Errorf("cannot derive repository URL from %q", cfg.ChartRepo)
+	base, err := repoBaseURL(cfg.ChartRepo)
+	if err != nil {
+		return err
 	}
 
 	argv := []string{"repo", "add", cfg.ChartRepoAlias, base, "--force-update"}
