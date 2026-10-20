@@ -28,6 +28,12 @@ type helmValues struct {
 type dbAgentValues struct {
 	Enabled bool   `yaml:"enabled"`
 	APIURL  string `yaml:"apiURL,omitempty"`
+	// OrganizationID associates the deployment with its CAST AI
+	// organization; the chart requires it on every component.
+	OrganizationID string `yaml:"organizationID,omitempty"`
+	// DatabaseInstanceID identifies the database instance the agent
+	// manages; the db-agent chart requires it.
+	DatabaseInstanceID string `yaml:"databaseInstanceID,omitempty"`
 	// APIKeySecretRef names the Secret carrying the CAST AI API key
 	// (API_KEY); the wizard recreates it on every install.
 	APIKeySecretRef string          `yaml:"apiKeySecretRef,omitempty"`
@@ -41,7 +47,11 @@ type dbAgentDatabase struct {
 }
 
 type dbProxyValues struct {
-	Enabled         bool          `yaml:"enabled"`
+	Enabled        bool   `yaml:"enabled"`
+	OrganizationID string `yaml:"organizationID,omitempty"`
+	// ProxyID identifies this proxy instance; the db-proxy chart
+	// requires it.
+	ProxyID         string        `yaml:"proxyID,omitempty"`
 	APIKeySecretRef string        `yaml:"apiKeySecretRef,omitempty"`
 	Pooling         poolingValues `yaml:"pooling"`
 }
@@ -62,8 +72,12 @@ func newHelmValues(c Config) helmValues {
 	var v helmValues
 	v.DBAgent.Enabled = c.HasComponent(api.ComponentDBAgent)
 	v.DBAgent.APIURL = c.APIURL
+	v.DBAgent.OrganizationID = c.OrganizationID
+	v.DBAgent.DatabaseInstanceID = c.DatabaseInstanceID
 	v.DBAgent.Database.CredentialsSecretRef = c.agentCreds().SecretName
 	v.DBProxy.Enabled = c.HasComponent(api.ComponentDBProxy)
+	v.DBProxy.OrganizationID = c.OrganizationID
+	v.DBProxy.ProxyID = c.ProxyID
 	v.DBProxy.Pooling.Enabled = c.HasComponent(api.ComponentPooling)
 	v.DBProxy.Pooling.ProxySQL.UserSecretRef = c.poolingCreds().SecretName
 

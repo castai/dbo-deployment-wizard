@@ -21,6 +21,12 @@ type Config struct {
 	KubeContext  string
 	ChartVersion string
 
+	// OrganizationID, DatabaseInstanceID, and ProxyID come from
+	// required CLI flags; they are not interactive parameters.
+	OrganizationID     string
+	DatabaseInstanceID string
+	ProxyID            string
+
 	// Chart sourcing config, not a helm value.
 	ChartRepo      string
 	ChartRepoAlias string
@@ -175,6 +181,12 @@ func (c *Config) validate() error {
 	}
 	if len(c.Components) == 0 {
 		errs = append(errs, errors.New("at least one component is required"))
+	}
+	if c.HasComponent(api.ComponentDBAgent) && c.DatabaseInstanceID == "" {
+		errs = append(errs, errors.New("database instance ID is required when db-agent is selected"))
+	}
+	if c.HasComponent(api.ComponentDBProxy) && c.ProxyID == "" {
+		errs = append(errs, errors.New("proxy ID is required when db-proxy is selected"))
 	}
 	if c.HasComponent(api.ComponentDBAgent) && !c.AgentCreds.Provided() {
 		errs = append(errs, errors.New("agent credentials are required"))

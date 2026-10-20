@@ -17,16 +17,19 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 	r := require.New(t)
 
 	cfg := Config{
-		ReleaseName:  "castai-dbo",
-		ChartName:    "castai-dbo",
-		Namespace:    "castai-dbo",
-		KubeContext:  "kind-test",
-		ChartVersion: "1.4.2",
-		ChartRepo:    "https://charts.example.com/index.yaml",
-		Components:   []string{api.ComponentDBProxy, api.ComponentPooling},
-		APIURL:       "https://api.cast.ai",
-		APISecret:    "sec",
-		DryRun:       true,
+		ReleaseName:        "castai-dbo",
+		ChartName:          "castai-dbo",
+		Namespace:          "castai-dbo",
+		KubeContext:        "kind-test",
+		ChartVersion:       "1.4.2",
+		ChartRepo:          "https://charts.example.com/index.yaml",
+		OrganizationID:     "org-123",
+		DatabaseInstanceID: "db-123",
+		ProxyID:            "proxy-123",
+		Components:         []string{api.ComponentDBProxy, api.ComponentPooling},
+		APIURL:             "https://api.cast.ai",
+		APISecret:          "sec",
+		DryRun:             true,
 	}
 	cfg.ChartRepoAlias = defaultChartRepoAlias
 
@@ -43,6 +46,9 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 	r.Contains(rendered, "helm repo add castai-helm https://charts.example.com --force-update")
 	r.Contains(rendered, "# Dry run: not executing. Values that would be applied:")
 	r.Contains(rendered, "enabled: true")
+	r.Contains(rendered, "organizationID: org-123")
+	r.Contains(rendered, "databaseInstanceID: db-123")
+	r.Contains(rendered, "proxyID: proxy-123")
 	r.Contains(rendered, "# Exact command that would run:")
 	r.Contains(rendered, "helm upgrade --install castai-dbo castai-helm/castai-dbo --version 1.4.2 --namespace castai-dbo --kube-context kind-test --create-namespace -f -") //nolint:dupword
 }
@@ -51,17 +57,20 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 	r := require.New(t)
 
 	cfg := Config{
-		ReleaseName:  "castai-dbo",
-		ChartName:    "castai-dbo",
-		Namespace:    "castai-dbo",
-		KubeContext:  "kind-test",
-		ChartVersion: "1.4.2",
-		ChartRepo:    "https://charts.example.com/index.yaml",
-		Components:   []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling},
-		AgentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
-		PoolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
-		APIURL:       "https://api.cast.ai",
-		APISecret:    "sec",
+		ReleaseName:        "castai-dbo",
+		ChartName:          "castai-dbo",
+		Namespace:          "castai-dbo",
+		KubeContext:        "kind-test",
+		ChartVersion:       "1.4.2",
+		ChartRepo:          "https://charts.example.com/index.yaml",
+		OrganizationID:     "org-123",
+		DatabaseInstanceID: "db-123",
+		ProxyID:            "proxy-123",
+		Components:         []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling},
+		AgentCreds:         api.Credentials{Username: "agent", Password: "agentpass"},
+		PoolingCreds:       api.Credentials{Username: "pooler", Password: "poolpass"},
+		APIURL:             "https://api.cast.ai",
+		APISecret:          "sec",
 	}
 	cfg.ChartRepoAlias = defaultChartRepoAlias
 
@@ -112,13 +121,17 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 	r.NoError(yaml.Unmarshal(valuesBytes, &got))
 	r.Equal(helmValues{
 		DBAgent: dbAgentValues{
-			Enabled:         true,
-			APIURL:          "https://api.cast.ai",
-			APIKeySecretRef: "castai-dbo-api-key",
-			Database:        dbAgentDatabase{CredentialsSecretRef: "castai-dbo-agent-credentials"},
+			Enabled:            true,
+			APIURL:             "https://api.cast.ai",
+			OrganizationID:     "org-123",
+			DatabaseInstanceID: "db-123",
+			APIKeySecretRef:    "castai-dbo-api-key",
+			Database:           dbAgentDatabase{CredentialsSecretRef: "castai-dbo-agent-credentials"},
 		},
 		DBProxy: dbProxyValues{
 			Enabled:         true,
+			OrganizationID:  "org-123",
+			ProxyID:         "proxy-123",
 			APIKeySecretRef: "castai-dbo-api-key",
 			Pooling: poolingValues{
 				Enabled:  true,
@@ -255,6 +268,29 @@ func TestNewHelmValues_Cartesian(t *testing.T) {
 			},
 		},
 		{
+			name: "organization ID reaches every component",
+			config: Config{
+				Components:     []string{api.ComponentDBAgent, api.ComponentDBProxy},
+				OrganizationID: "org-123",
+			},
+			want: helmValues{
+				DBAgent: dbAgentValues{Enabled: true, OrganizationID: "org-123"},
+				DBProxy: dbProxyValues{Enabled: true, OrganizationID: "org-123"},
+			},
+		},
+		{
+			name: "database instance ID reaches db-agent, proxy ID reaches db-proxy",
+			config: Config{
+				Components:         []string{api.ComponentDBAgent, api.ComponentDBProxy},
+				DatabaseInstanceID: "db-123",
+				ProxyID:            "proxy-123",
+			},
+			want: helmValues{
+				DBAgent: dbAgentValues{Enabled: true, DatabaseInstanceID: "db-123"},
+				DBProxy: dbProxyValues{Enabled: true, ProxyID: "proxy-123"},
+			},
+		},
+		{
 			name: "pooling enabled without creds still renders pooling.enabled",
 			config: Config{
 				Components: []string{api.ComponentDBProxy, api.ComponentPooling},
@@ -364,6 +400,9 @@ func TestHelmValuesMarshal_OmitsEmptySections(t *testing.T) {
 	r.NotContains(rendered, "apiKeySecretRef:")
 	r.NotContains(rendered, "database:")
 	r.NotContains(rendered, "userSecretRef:")
+	r.NotContains(rendered, "organizationID:")
+	r.NotContains(rendered, "databaseInstanceID:")
+	r.NotContains(rendered, "proxyID:")
 	r.Contains(rendered, "db-agent:")
 	r.Contains(rendered, "db-proxy:")
 	r.Contains(rendered, "pooling:")

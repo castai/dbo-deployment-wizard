@@ -75,6 +75,13 @@ The wizard requires a real terminal; it cannot be run from a pipe or CI.`,
 		"Pre-fills the kubectl-context prompt. The wizard always confirms or overrides.")
 	cmd.Flags().StringVar(&cfg.Namespace, "namespace", cfg.Namespace,
 		"Pre-fills the namespace prompt. The wizard always confirms or overrides.")
+	cmd.Flags().StringVar(&cfg.OrganizationID, "organization-id", "",
+		"CAST AI organization ID to associate the deployment with. Required.")
+	_ = cmd.MarkFlagRequired("organization-id")
+	cmd.Flags().StringVar(&cfg.DatabaseInstanceID, "database-instance-id", "",
+		"Database instance ID the db-agent manages. Required when db-agent is selected.")
+	cmd.Flags().StringVar(&cfg.ProxyID, "proxy-id", "",
+		"ID of this db-proxy instance. Required when db-proxy is selected.")
 	cmd.Flags().StringSliceVar(&cfg.Components, "components", cfg.Components,
 		"Comma-separated list of chart components to install (e.g. \"db-agent,db-proxy,pooling\"). "+
 			"Allowed values: db-agent, db-proxy, pooling. "+
