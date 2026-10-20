@@ -42,15 +42,18 @@ func TestConfigSetEndpoints(t *testing.T) {
 		want    []Endpoint
 		wantErr string
 	}{
-		"none is valid":      {raw: nil, want: []Endpoint{}},
-		"host and port":      {raw: []string{"db.example.com:5432"}, want: []Endpoint{{Host: "db.example.com", Port: 5432}}},
-		"readonly endpoint":  {raw: []string{"db.example.com:5433,readonly"}, want: []Endpoint{{Host: "db.example.com", Port: 5433, Readonly: true}}},
-		"multiple endpoints": {raw: []string{"db.example.com:5432", "ro.example.com:5433,readonly"}, want: []Endpoint{{Host: "db.example.com", Port: 5432}, {Host: "ro.example.com", Port: 5433, Readonly: true}}},
-		"ipv6 host":          {raw: []string{"[::1]:5432"}, want: []Endpoint{{Host: "::1", Port: 5432}}},
-		"missing port":       {raw: []string{"db.example.com"}, wantErr: `invalid endpoint "db.example.com": want host:port or host:port,readonly`},
-		"non-numeric port":   {raw: []string{"db.example.com:abc"}, wantErr: `invalid endpoint "db.example.com:abc": port must be a number between 1 and 65535`},
-		"port out of range":  {raw: []string{"db.example.com:0"}, wantErr: `invalid endpoint "db.example.com:0": port must be a number between 1 and 65535`},
-		"unknown suffix":     {raw: []string{"db.example.com:5432,ro"}, wantErr: `invalid endpoint "db.example.com:5432,ro": want host:port or host:port,readonly`},
+		"none is valid":     {raw: nil, want: []Endpoint{}},
+		"host and port":     {raw: []string{"db.example.com:5432"}, want: []Endpoint{{Host: "db.example.com", Port: 5432}}},
+		"readonly endpoint": {raw: []string{"db.example.com:5433,readonly"}, want: []Endpoint{{Host: "db.example.com", Port: 5433, Readonly: true}}},
+		"multiple endpoints": {
+			raw:  []string{"db.example.com:5432", "ro.example.com:5433,readonly"},
+			want: []Endpoint{{Host: "db.example.com", Port: 5432}, {Host: "ro.example.com", Port: 5433, Readonly: true}},
+		},
+		"ipv6 host":         {raw: []string{"[::1]:5432"}, want: []Endpoint{{Host: "::1", Port: 5432}}},
+		"missing port":      {raw: []string{"db.example.com"}, wantErr: `invalid endpoint "db.example.com": want host:port or host:port,readonly`},
+		"non-numeric port":  {raw: []string{"db.example.com:abc"}, wantErr: `invalid endpoint "db.example.com:abc": port must be a number between 1 and 65535`},
+		"port out of range": {raw: []string{"db.example.com:0"}, wantErr: `invalid endpoint "db.example.com:0": port must be a number between 1 and 65535`},
+		"unknown suffix":    {raw: []string{"db.example.com:5432,ro"}, wantErr: `invalid endpoint "db.example.com:5432,ro": want host:port or host:port,readonly`},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -60,6 +63,7 @@ func TestConfigSetEndpoints(t *testing.T) {
 			err := c.SetEndpoints(tt.raw)
 			if tt.wantErr != "" {
 				r.EqualError(err, tt.wantErr)
+
 				return
 			}
 			r.NoError(err)

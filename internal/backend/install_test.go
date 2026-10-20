@@ -404,6 +404,7 @@ func TestRepoBaseURL(t *testing.T) {
 			got, err := repoBaseURL(tt.indexURL)
 			if tt.wantErr {
 				r.Error(err)
+
 				return
 			}
 			r.NoError(err)
