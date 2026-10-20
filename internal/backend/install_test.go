@@ -57,6 +57,8 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 	r.Contains(rendered, "port: 5432")
 	r.Contains(rendered, "protocol: postgres")
 	r.Contains(rendered, "address: db.example.com:5432")
+	r.Contains(rendered, "nameOverride: db-agent-castai-dbo")
+	r.Contains(rendered, "nameOverride: db-proxy-castai-dbo")
 	r.Contains(rendered, "# Exact command that would run:")
 	r.Contains(rendered, "helm upgrade --install castai-dbo castai-helm/castai-dbo --version 1.4.2 --namespace castai-dbo --kube-context kind-test --create-namespace -f -") //nolint:dupword
 }
@@ -133,6 +135,7 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 	r.Equal(helmValues{
 		DBAgent: dbAgentValues{
 			Enabled:            true,
+			NameOverride:       "db-agent-castai-dbo",
 			APIURL:             "https://api.cast.ai",
 			OrganizationID:     "org-123",
 			DatabaseInstanceID: "db-123",
@@ -147,6 +150,7 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 		},
 		DBProxy: dbProxyValues{
 			Enabled:         true,
+			NameOverride:    "db-proxy-castai-dbo",
 			APIURL:          "api-grpc.cast.ai",
 			OrganizationID:  "org-123",
 			ProxyID:         "proxy-123",
@@ -330,6 +334,17 @@ func TestNewHelmValues_Cartesian(t *testing.T) {
 			},
 		},
 		{
+			name: "subchart resources are named after the release",
+			config: Config{
+				ReleaseName: "my-instance-37cc7",
+				Components:  []string{api.ComponentDBAgent, api.ComponentDBProxy},
+			},
+			want: helmValues{
+				DBAgent: dbAgentValues{Enabled: true, NameOverride: "db-agent-my-instance-37cc7"},
+				DBProxy: dbProxyValues{Enabled: true, NameOverride: "db-proxy-my-instance-37cc7"},
+			},
+		},
+		{
 			name: "pooling enabled without creds still renders pooling.enabled",
 			config: Config{
 				Components: []string{api.ComponentDBProxy, api.ComponentPooling},
@@ -446,6 +461,7 @@ func TestHelmValuesMarshal_OmitsEmptySections(t *testing.T) {
 	r.NotContains(rendered, "protocol:")
 	r.NotContains(rendered, "host:")
 	r.NotContains(rendered, "endpoints:")
+	r.NotContains(rendered, "nameOverride:")
 	r.Contains(rendered, "db-agent:")
 	r.Contains(rendered, "db-proxy:")
 	r.Contains(rendered, "pooling:")

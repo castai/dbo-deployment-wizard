@@ -29,6 +29,10 @@ type helmValues struct {
 type dbAgentValues struct {
 	Enabled bool   `yaml:"enabled"`
 	APIURL  string `yaml:"apiURL,omitempty"`
+	// NameOverride names the db-agent's resources after the release;
+	// without it the umbrella chart names them by the bare alias, so
+	// same-namespace releases collide.
+	NameOverride string `yaml:"nameOverride,omitempty"`
 	// OrganizationID associates the deployment with its CAST AI
 	// organization; the chart requires it on every component.
 	OrganizationID string `yaml:"organizationID,omitempty"`
@@ -59,6 +63,10 @@ type dbProxyValues struct {
 	// APIURL is the scheme-less CAST AI endpoint the proxy reports
 	// through; the chart configmap prepends the https:// scheme.
 	APIURL string `yaml:"apiURL,omitempty"`
+	// NameOverride names the db-proxy's resources after the release;
+	// without it the umbrella chart names them by the bare alias, so
+	// same-namespace releases collide.
+	NameOverride string `yaml:"nameOverride,omitempty"`
 	// ProxyID identifies this proxy instance; the db-proxy chart
 	// requires it.
 	ProxyID         string                  `yaml:"proxyID,omitempty"`
@@ -90,6 +98,10 @@ type proxySQLValues struct {
 func newHelmValues(c Config) helmValues {
 	var v helmValues
 	v.DBAgent.Enabled = c.HasComponent(api.ComponentDBAgent)
+	if c.ReleaseName != "" {
+		v.DBAgent.NameOverride = "db-agent-" + c.ReleaseName
+		v.DBProxy.NameOverride = "db-proxy-" + c.ReleaseName
+	}
 	v.DBAgent.APIURL = c.APIURL
 	v.DBAgent.OrganizationID = c.OrganizationID
 	v.DBAgent.DatabaseInstanceID = c.DatabaseInstanceID
