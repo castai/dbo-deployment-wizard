@@ -3,12 +3,27 @@ package backend
 import (
 	"errors"
 	"fmt"
+	"net"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/samber/lo"
 
 	"github.com/castai/dbo-deployment-wizard/internal/api"
+)
+
+// Endpoint is one upstream database endpoint of the deployment.
+type Endpoint struct {
+	Host     string
+	Port     int
+	Readonly bool
+}
+
+// Target database protocols the wizard supports.
+const (
+	protocolPostgres = "postgres"
+	protocolMySQL    = "mysql"
 )
 
 // Config is every deployment parameter, from the CLI's flags to the
@@ -21,11 +36,17 @@ type Config struct {
 	KubeContext  string
 	ChartVersion string
 
-	// OrganizationID, DatabaseInstanceID, and ProxyID come from
-	// required CLI flags; they are not interactive parameters.
+	// CLI-sourced parameters, not interactive: the identifiers, the
+	// target's protocol and upstream endpoints (the db-agent's
+	// database host/port come from the first endpoint), and the gRPC
+	// endpoint the components report through, which also feeds
+	// db-proxy's apiURL.
 	OrganizationID     string
 	DatabaseInstanceID string
 	ProxyID            string
+	Protocol           string
+	Endpoints          []Endpoint
+	GRPCEndpoint       string
 
 	// Chart sourcing config, not a helm value.
 	ChartRepo      string
@@ -64,6 +85,10 @@ const (
 	// registers the chart repository under; it must match the
 	// repo_name/chart form helm expects for the chart reference.
 	defaultChartRepoAlias = "castai-helm"
+
+	// defaultGRPCEndpoint is the CAST AI gRPC endpoint the components
+	// report through.
+	defaultGRPCEndpoint = "api-grpc.cast.ai"
 )
 
 // NewDefaultConfig returns the initial configuration with every
@@ -76,6 +101,7 @@ func NewDefaultConfig() Config {
 		ChartName:      defaultChartName,
 		ReleaseName:    defaultReleaseName,
 		Namespace:      defaultNamespace,
+		GRPCEndpoint:   defaultGRPCEndpoint,
 
 		Components: []string{api.ComponentDBAgent, api.ComponentDBProxy},
 	}
@@ -141,6 +167,45 @@ func (c *Config) poolingCreds() api.Credentials {
 	return c.PoolingCreds
 }
 
+// SetEndpoints parses the repeatable endpoint arguments — each
+// host:port, or host:port,readonly — into the endpoint list,
+// replacing any previous ones.
+func (c *Config) SetEndpoints(raw []string) error {
+	endpoints := make([]Endpoint, 0, len(raw))
+	for _, s := range raw {
+		e, err := parseEndpoint(s)
+		if err != nil {
+			return err
+		}
+		endpoints = append(endpoints, e)
+	}
+	c.Endpoints = endpoints
+
+	return nil
+}
+
+func parseEndpoint(s string) (Endpoint, error) {
+	address, suffix, hasSuffix := strings.Cut(s, ",")
+	readonly := false
+	if hasSuffix {
+		if suffix != "readonly" {
+			return Endpoint{}, fmt.Errorf("invalid endpoint %q: want host:port or host:port,readonly", s)
+		}
+		readonly = true
+	}
+
+	host, portStr, err := net.SplitHostPort(address)
+	if err != nil {
+		return Endpoint{}, fmt.Errorf("invalid endpoint %q: want host:port or host:port,readonly", s)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 1 || port > 65535 {
+		return Endpoint{}, fmt.Errorf("invalid endpoint %q: port must be a number between 1 and 65535", s)
+	}
+
+	return Endpoint{Host: host, Port: port, Readonly: readonly}, nil
+}
+
 // SetComponentEnabled toggles a single component; validity is
 // enforced by SetComponents.
 func (c *Config) SetComponentEnabled(name string, enabled bool) error {
@@ -187,6 +252,12 @@ func (c *Config) validate() error {
 	}
 	if c.HasComponent(api.ComponentDBProxy) && c.ProxyID == "" {
 		errs = append(errs, errors.New("proxy ID is required when db-proxy is selected"))
+	}
+	if c.Protocol != protocolPostgres && c.Protocol != protocolMySQL {
+		errs = append(errs, fmt.Errorf("protocol must be %s or %s", protocolPostgres, protocolMySQL))
+	}
+	if (c.HasComponent(api.ComponentDBAgent) || c.HasComponent(api.ComponentDBProxy)) && len(c.Endpoints) == 0 {
+		errs = append(errs, errors.New("at least one endpoint is required"))
 	}
 	if c.HasComponent(api.ComponentDBAgent) && !c.AgentCreds.Provided() {
 		errs = append(errs, errors.New("agent credentials are required"))

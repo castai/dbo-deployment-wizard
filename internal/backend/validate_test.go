@@ -17,6 +17,8 @@ func TestConfigValidate(t *testing.T) {
 		cfg.APISecret = "secret"
 		cfg.DatabaseInstanceID = "db-123"
 		cfg.ProxyID = "proxy-123"
+		cfg.Protocol = protocolPostgres
+		cfg.Endpoints = []Endpoint{{Host: "db.example.com", Port: 5432}}
 		cfg.AgentCreds = api.Credentials{Username: "agent", Password: "agentpass"}
 		if mutate != nil {
 			mutate(&cfg)
@@ -77,6 +79,14 @@ func TestConfigValidate(t *testing.T) {
 				c.ProxyID = ""
 				require.NoError(t, c.SetComponents([]string{api.ComponentDBAgent}))
 			},
+		},
+		"invalid protocol": {
+			mutate:  func(c *Config) { c.Protocol = "oracle" },
+			wantErr: "protocol must be postgres or mysql",
+		},
+		"missing endpoints": {
+			mutate:  func(c *Config) { c.Endpoints = nil },
+			wantErr: "at least one endpoint is required",
 		},
 		"missing agent credentials": {
 			mutate:  func(c *Config) { c.AgentCreds = api.Credentials{} },

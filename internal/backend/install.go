@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"al.essio.dev/pkg/shellescape"
+	"github.com/samber/lo"
 	"gopkg.in/yaml.v3"
 
 	"github.com/castai/dbo-deployment-wizard/internal/api"
@@ -34,6 +35,9 @@ type dbAgentValues struct {
 	// DatabaseInstanceID identifies the database instance the agent
 	// manages; the db-agent chart requires it.
 	DatabaseInstanceID string `yaml:"databaseInstanceID,omitempty"`
+	// GRPCEndpoint is the CAST AI gRPC endpoint the agent reports
+	// through; the db-agent chart requires it.
+	GRPCEndpoint string `yaml:"gRPCEndpoint,omitempty"`
 	// APIKeySecretRef names the Secret carrying the CAST AI API key
 	// (API_KEY); the wizard recreates it on every install.
 	APIKeySecretRef string          `yaml:"apiKeySecretRef,omitempty"`
@@ -41,6 +45,9 @@ type dbAgentValues struct {
 }
 
 type dbAgentDatabase struct {
+	Host     string `yaml:"host,omitempty"`
+	Port     int    `yaml:"port,omitempty"`
+	Protocol string `yaml:"protocol,omitempty"`
 	// CredentialsSecretRef names the Secret holding the agent's
 	// database user (DATABASE_USERNAME / DATABASE_PASSWORD keys).
 	CredentialsSecretRef string `yaml:"credentialsSecretRef,omitempty"`
@@ -49,11 +56,23 @@ type dbAgentDatabase struct {
 type dbProxyValues struct {
 	Enabled        bool   `yaml:"enabled"`
 	OrganizationID string `yaml:"organizationID,omitempty"`
+	// APIURL is the scheme-less CAST AI endpoint the proxy reports
+	// through; the chart configmap prepends the https:// scheme.
+	APIURL string `yaml:"apiURL,omitempty"`
 	// ProxyID identifies this proxy instance; the db-proxy chart
 	// requires it.
-	ProxyID         string        `yaml:"proxyID,omitempty"`
-	APIKeySecretRef string        `yaml:"apiKeySecretRef,omitempty"`
-	Pooling         poolingValues `yaml:"pooling"`
+	ProxyID         string                  `yaml:"proxyID,omitempty"`
+	Protocol        string                  `yaml:"protocol,omitempty"`
+	APIKeySecretRef string                  `yaml:"apiKeySecretRef,omitempty"`
+	Endpoints       []dbProxyEndpointValues `yaml:"endpoints,omitempty"`
+	Pooling         poolingValues           `yaml:"pooling"`
+}
+
+// dbProxyEndpointValues is one upstream database endpoint the proxy
+// forwards to, as host:port.
+type dbProxyEndpointValues struct {
+	Address  string `yaml:"address"`
+	Readonly bool   `yaml:"readonly"`
 }
 
 type poolingValues struct {
@@ -74,10 +93,23 @@ func newHelmValues(c Config) helmValues {
 	v.DBAgent.APIURL = c.APIURL
 	v.DBAgent.OrganizationID = c.OrganizationID
 	v.DBAgent.DatabaseInstanceID = c.DatabaseInstanceID
+	v.DBAgent.GRPCEndpoint = c.GRPCEndpoint
+	v.DBAgent.Database.Protocol = c.Protocol
+	if len(c.Endpoints) > 0 {
+		v.DBAgent.Database.Host = c.Endpoints[0].Host
+		v.DBAgent.Database.Port = c.Endpoints[0].Port
+	}
 	v.DBAgent.Database.CredentialsSecretRef = c.agentCreds().SecretName
 	v.DBProxy.Enabled = c.HasComponent(api.ComponentDBProxy)
+	v.DBProxy.APIURL = grpcAPIURL(c.GRPCEndpoint)
 	v.DBProxy.OrganizationID = c.OrganizationID
 	v.DBProxy.ProxyID = c.ProxyID
+	v.DBProxy.Protocol = proxyChartProtocol(c.Protocol)
+	if len(c.Endpoints) > 0 {
+		v.DBProxy.Endpoints = lo.Map(c.Endpoints, func(e Endpoint, _ int) dbProxyEndpointValues {
+			return dbProxyEndpointValues{Address: fmt.Sprintf("%s:%d", e.Host, e.Port), Readonly: e.Readonly}
+		})
+	}
 	v.DBProxy.Pooling.Enabled = c.HasComponent(api.ComponentPooling)
 	v.DBProxy.Pooling.ProxySQL.UserSecretRef = c.poolingCreds().SecretName
 
@@ -89,6 +121,26 @@ func newHelmValues(c Config) helmValues {
 // the alias by ensureRepo before the install runs.
 func chartRef(c Config) string {
 	return c.ChartRepoAlias + "/" + c.ChartName
+}
+
+// grpcAPIURL adapts the gRPC endpoint for db-proxy's apiURL value,
+// which must be scheme-less — the chart configmap prepends https://.
+func grpcAPIURL(endpoint string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
+}
+
+// proxyChartProtocol maps the wizard's protocol to db-proxy's
+// capitalized form; db-agent consumes the lowercase form directly.
+// An unset protocol maps to an unset value.
+func proxyChartProtocol(protocol string) string {
+	switch protocol {
+	case protocolMySQL:
+		return "MySQL"
+	case protocolPostgres:
+		return "PostgreSQL"
+	default:
+		return ""
+	}
 }
 
 // repoBaseURL derives the helm repository base URL from the index

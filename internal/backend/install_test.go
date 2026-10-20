@@ -26,6 +26,9 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 		OrganizationID:     "org-123",
 		DatabaseInstanceID: "db-123",
 		ProxyID:            "proxy-123",
+		GRPCEndpoint:       "api-grpc.cast.ai",
+		Protocol:           "postgres",
+		Endpoints:          []Endpoint{{Host: "db.example.com", Port: 5432}},
 		Components:         []string{api.ComponentDBProxy, api.ComponentPooling},
 		APIURL:             "https://api.cast.ai",
 		APISecret:          "sec",
@@ -49,6 +52,11 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 	r.Contains(rendered, "organizationID: org-123")
 	r.Contains(rendered, "databaseInstanceID: db-123")
 	r.Contains(rendered, "proxyID: proxy-123")
+	r.Contains(rendered, "gRPCEndpoint: api-grpc.cast.ai")
+	r.Contains(rendered, "host: db.example.com")
+	r.Contains(rendered, "port: 5432")
+	r.Contains(rendered, "protocol: postgres")
+	r.Contains(rendered, "address: db.example.com:5432")
 	r.Contains(rendered, "# Exact command that would run:")
 	r.Contains(rendered, "helm upgrade --install castai-dbo castai-helm/castai-dbo --version 1.4.2 --namespace castai-dbo --kube-context kind-test --create-namespace -f -") //nolint:dupword
 }
@@ -66,6 +74,9 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 		OrganizationID:     "org-123",
 		DatabaseInstanceID: "db-123",
 		ProxyID:            "proxy-123",
+		GRPCEndpoint:       "api-grpc.cast.ai",
+		Protocol:           "postgres",
+		Endpoints:          []Endpoint{{Host: "db.example.com", Port: 5432}},
 		Components:         []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling},
 		AgentCreds:         api.Credentials{Username: "agent", Password: "agentpass"},
 		PoolingCreds:       api.Credentials{Username: "pooler", Password: "poolpass"},
@@ -125,14 +136,23 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 			APIURL:             "https://api.cast.ai",
 			OrganizationID:     "org-123",
 			DatabaseInstanceID: "db-123",
+			GRPCEndpoint:       "api-grpc.cast.ai",
 			APIKeySecretRef:    "castai-dbo-api-key",
-			Database:           dbAgentDatabase{CredentialsSecretRef: "castai-dbo-agent-credentials"},
+			Database: dbAgentDatabase{
+				Host:                 "db.example.com",
+				Port:                 5432,
+				Protocol:             "postgres",
+				CredentialsSecretRef: "castai-dbo-agent-credentials",
+			},
 		},
 		DBProxy: dbProxyValues{
 			Enabled:         true,
+			APIURL:          "api-grpc.cast.ai",
 			OrganizationID:  "org-123",
 			ProxyID:         "proxy-123",
+			Protocol:        "PostgreSQL",
 			APIKeySecretRef: "castai-dbo-api-key",
+			Endpoints:       []dbProxyEndpointValues{{Address: "db.example.com:5432"}},
 			Pooling: poolingValues{
 				Enabled:  true,
 				ProxySQL: proxySQLValues{UserSecretRef: "castai-dbo-pooling-credentials"},
@@ -291,6 +311,25 @@ func TestNewHelmValues_Cartesian(t *testing.T) {
 			},
 		},
 		{
+			name: "endpoints and protocol reach the components",
+			config: Config{
+				Components: []string{api.ComponentDBAgent, api.ComponentDBProxy},
+				Protocol:   protocolMySQL,
+				Endpoints: []Endpoint{
+					{Host: "db.example.com", Port: 3306},
+					{Host: "ro.example.com", Port: 3307, Readonly: true},
+				},
+			},
+			want: helmValues{
+				DBAgent: dbAgentValues{Enabled: true, Database: dbAgentDatabase{Host: "db.example.com", Port: 3306, Protocol: protocolMySQL}},
+				DBProxy: dbProxyValues{
+					Enabled:   true,
+					Protocol:  "MySQL",
+					Endpoints: []dbProxyEndpointValues{{Address: "db.example.com:3306"}, {Address: "ro.example.com:3307", Readonly: true}},
+				},
+			},
+		},
+		{
 			name: "pooling enabled without creds still renders pooling.enabled",
 			config: Config{
 				Components: []string{api.ComponentDBProxy, api.ComponentPooling},
@@ -403,6 +442,10 @@ func TestHelmValuesMarshal_OmitsEmptySections(t *testing.T) {
 	r.NotContains(rendered, "organizationID:")
 	r.NotContains(rendered, "databaseInstanceID:")
 	r.NotContains(rendered, "proxyID:")
+	r.NotContains(rendered, "gRPCEndpoint:")
+	r.NotContains(rendered, "protocol:")
+	r.NotContains(rendered, "host:")
+	r.NotContains(rendered, "endpoints:")
 	r.Contains(rendered, "db-agent:")
 	r.Contains(rendered, "db-proxy:")
 	r.Contains(rendered, "pooling:")
