@@ -15,6 +15,10 @@ func TestConfigValidate(t *testing.T) {
 		cfg.KubeContext = "kind-test"
 		cfg.ChartVersion = "1.4.2"
 		cfg.APISecret = "secret"
+		cfg.DatabaseInstanceID = "db-123"
+		cfg.ProxyID = "proxy-123"
+		cfg.Protocol = protocolPostgres
+		cfg.Endpoints = []Endpoint{{Host: "db.example.com", Port: 5432}}
 		cfg.AgentCreds = api.Credentials{Username: "agent", Password: "agentpass"}
 		if mutate != nil {
 			mutate(&cfg)
@@ -55,6 +59,34 @@ func TestConfigValidate(t *testing.T) {
 		"no components": {
 			mutate:  func(c *Config) { require.NoError(t, c.SetComponents(nil)) },
 			wantErr: "at least one component is required",
+		},
+		"missing database instance ID": {
+			mutate:  func(c *Config) { c.DatabaseInstanceID = "" },
+			wantErr: "database instance ID is required when db-agent is selected",
+		},
+		"database instance ID not required without db-agent": {
+			mutate: func(c *Config) {
+				c.DatabaseInstanceID = ""
+				require.NoError(t, c.SetComponents([]string{api.ComponentDBProxy}))
+			},
+		},
+		"missing proxy ID": {
+			mutate:  func(c *Config) { c.ProxyID = "" },
+			wantErr: "proxy ID is required when db-proxy is selected",
+		},
+		"proxy ID not required without db-proxy": {
+			mutate: func(c *Config) {
+				c.ProxyID = ""
+				require.NoError(t, c.SetComponents([]string{api.ComponentDBAgent}))
+			},
+		},
+		"invalid protocol": {
+			mutate:  func(c *Config) { c.Protocol = "oracle" },
+			wantErr: "protocol must be postgres or mysql",
+		},
+		"missing endpoints": {
+			mutate:  func(c *Config) { c.Endpoints = nil },
+			wantErr: "at least one endpoint is required",
 		},
 		"missing agent credentials": {
 			mutate:  func(c *Config) { c.AgentCreds = api.Credentials{} },

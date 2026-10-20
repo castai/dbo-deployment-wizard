@@ -15,19 +15,61 @@ func TestNewDefaultConfig(t *testing.T) {
 	r.Equal([]string{api.ComponentDBAgent, api.ComponentDBProxy}, cfg.Components)
 
 	static := map[string]string{
-		"APIURL":      cfg.APIURL,
-		"ChartRepo":   cfg.ChartRepo,
-		"ChartName":   cfg.ChartName,
-		"ReleaseName": cfg.ReleaseName,
-		"Namespace":   cfg.Namespace,
+		"APIURL":       cfg.APIURL,
+		"ChartRepo":    cfg.ChartRepo,
+		"ChartName":    cfg.ChartName,
+		"ReleaseName":  cfg.ReleaseName,
+		"Namespace":    cfg.Namespace,
+		"GRPCEndpoint": cfg.GRPCEndpoint,
 	}
 	for name, v := range static {
 		r.NotEmpty(v, "NewDefaultConfig must prefill %s", name)
 	}
 
-	// The discovery-based fields have no static default.
+	// The discovery-based and CLI-required fields have no static
+	// default.
 	r.Empty(cfg.KubeContext)
 	r.Empty(cfg.ChartVersion)
+	r.Empty(cfg.Protocol)
+	r.Empty(cfg.Endpoints)
+}
+
+// TestConfigSetEndpoints pins the endpoint argument grammar: host:port
+// pairs, the readonly suffix, and the parse failures.
+func TestConfigSetEndpoints(t *testing.T) {
+	tests := map[string]struct {
+		raw     []string
+		want    []Endpoint
+		wantErr string
+	}{
+		"none is valid":     {raw: nil, want: []Endpoint{}},
+		"host and port":     {raw: []string{"db.example.com:5432"}, want: []Endpoint{{Host: "db.example.com", Port: 5432}}},
+		"readonly endpoint": {raw: []string{"db.example.com:5433,readonly"}, want: []Endpoint{{Host: "db.example.com", Port: 5433, Readonly: true}}},
+		"multiple endpoints": {
+			raw:  []string{"db.example.com:5432", "ro.example.com:5433,readonly"},
+			want: []Endpoint{{Host: "db.example.com", Port: 5432}, {Host: "ro.example.com", Port: 5433, Readonly: true}},
+		},
+		"ipv6 host":         {raw: []string{"[::1]:5432"}, want: []Endpoint{{Host: "::1", Port: 5432}}},
+		"missing port":      {raw: []string{"db.example.com"}, wantErr: `invalid endpoint "db.example.com": want host:port or host:port,readonly`},
+		"non-numeric port":  {raw: []string{"db.example.com:abc"}, wantErr: `invalid endpoint "db.example.com:abc": port must be a number between 1 and 65535`},
+		"port out of range": {raw: []string{"db.example.com:0"}, wantErr: `invalid endpoint "db.example.com:0": port must be a number between 1 and 65535`},
+		"unknown suffix":    {raw: []string{"db.example.com:5432,ro"}, wantErr: `invalid endpoint "db.example.com:5432,ro": want host:port or host:port,readonly`},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := require.New(t)
+
+			c := NewDefaultConfig()
+			err := c.SetEndpoints(tt.raw)
+			if tt.wantErr != "" {
+				r.EqualError(err, tt.wantErr)
+
+				return
+			}
+			r.NoError(err)
+			r.Equal(tt.want, c.Endpoints)
+		})
+	}
 }
 
 func TestConfigSetComponents(t *testing.T) {

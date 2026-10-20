@@ -17,16 +17,24 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 	r := require.New(t)
 
 	cfg := Config{
-		ReleaseName:  "castai-dbo",
-		ChartName:    "castai-dbo",
-		Namespace:    "castai-dbo",
-		KubeContext:  "kind-test",
-		ChartVersion: "1.4.2",
-		Components:   []string{api.ComponentDBProxy, api.ComponentPooling},
-		APIURL:       "https://api.cast.ai",
-		APISecret:    "sec",
-		DryRun:       true,
+		ReleaseName:        "castai-dbo",
+		ChartName:          "castai-dbo",
+		Namespace:          "castai-dbo",
+		KubeContext:        "kind-test",
+		ChartVersion:       "1.4.2",
+		ChartRepo:          "https://charts.example.com/index.yaml",
+		OrganizationID:     "org-123",
+		DatabaseInstanceID: "db-123",
+		ProxyID:            "proxy-123",
+		GRPCEndpoint:       "api-grpc.cast.ai",
+		Protocol:           "postgres",
+		Endpoints:          []Endpoint{{Host: "db.example.com", Port: 5432}},
+		Components:         []string{api.ComponentDBProxy, api.ComponentPooling},
+		APIURL:             "https://api.cast.ai",
+		APISecret:          "sec",
+		DryRun:             true,
 	}
+	cfg.ChartRepoAlias = defaultChartRepoAlias
 
 	// The strict mock fails on any shell run — a dry run must not execute.
 	sh := backendmocks.NewMockProcessRunner(t)
@@ -36,28 +44,48 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 	r.NoError(Install(t.Context(), values, cfg, sh, &out))
 
 	rendered := out.String()
-	r.Contains(rendered, "Installing helm chart castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "Installing helm chart castai-helm/castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "# Dry run: not executing. Repository command that would run:")
+	r.Contains(rendered, "helm repo add castai-helm https://charts.example.com --force-update")
 	r.Contains(rendered, "# Dry run: not executing. Values that would be applied:")
 	r.Contains(rendered, "enabled: true")
+	r.Contains(rendered, "organizationID: org-123")
+	r.Contains(rendered, "databaseInstanceID: db-123")
+	r.Contains(rendered, "proxyID: proxy-123")
+	r.Contains(rendered, "gRPCEndpoint: api-grpc.cast.ai")
+	r.Contains(rendered, "host: db.example.com")
+	r.Contains(rendered, "port: 5432")
+	r.Contains(rendered, "protocol: postgres")
+	r.Contains(rendered, "address: db.example.com:5432")
+	r.Contains(rendered, "nameOverride: db-agent-castai-dbo")
+	r.Contains(rendered, "nameOverride: db-proxy-castai-dbo")
 	r.Contains(rendered, "# Exact command that would run:")
-	r.Contains(rendered, "helm upgrade --install castai-dbo castai-dbo --version 1.4.2 --namespace castai-dbo --kube-context kind-test --create-namespace -f -") //nolint:dupword
+	r.Contains(rendered, "helm upgrade --install castai-dbo castai-helm/castai-dbo --version 1.4.2 --namespace castai-dbo --kube-context kind-test --create-namespace -f -") //nolint:dupword
 }
 
 func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 	r := require.New(t)
 
 	cfg := Config{
-		ReleaseName:  "castai-dbo",
-		ChartName:    "castai-dbo",
-		Namespace:    "castai-dbo",
-		KubeContext:  "kind-test",
-		ChartVersion: "1.4.2",
-		Components:   []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling},
-		AgentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
-		PoolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
-		APIURL:       "https://api.cast.ai",
-		APISecret:    "sec",
+		ReleaseName:        "castai-dbo",
+		ChartName:          "castai-dbo",
+		Namespace:          "castai-dbo",
+		KubeContext:        "kind-test",
+		ChartVersion:       "1.4.2",
+		ChartRepo:          "https://charts.example.com/index.yaml",
+		OrganizationID:     "org-123",
+		DatabaseInstanceID: "db-123",
+		ProxyID:            "proxy-123",
+		GRPCEndpoint:       "api-grpc.cast.ai",
+		Protocol:           "postgres",
+		Endpoints:          []Endpoint{{Host: "db.example.com", Port: 5432}},
+		Components:         []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling},
+		AgentCreds:         api.Credentials{Username: "agent", Password: "agentpass"},
+		PoolingCreds:       api.Credentials{Username: "pooler", Password: "poolpass"},
+		APIURL:             "https://api.cast.ai",
+		APISecret:          "sec",
 	}
+	cfg.ChartRepoAlias = defaultChartRepoAlias
 
 	k := backendmocks.NewMockKubectl(t)
 	k.EXPECT().ListSecrets(mock.Anything, "kind-test", "castai-dbo").Return(nil, nil)
@@ -72,6 +100,9 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 
 	var valuesBytes []byte
 	sh := backendmocks.NewMockProcessRunner(t)
+	sh.EXPECT().Run(mock.Anything, "helm", mock.Anything,
+		mock.MatchedBy(func(args []string) bool { return args[0] == "repo" })).
+		Return([]byte("\"castai-helm\" has been added to your repositories\n"), nil)
 	sh.EXPECT().Run(mock.Anything, "helm", mock.Anything,
 		mock.MatchedBy(func(args []string) bool { return args[0] == "upgrade" })).
 		Run(func(_ context.Context, _ string, stdin []byte, _ []string) {
@@ -92,7 +123,8 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 	r.Contains(rendered, "creating secret castai-dbo-agent-credentials")
 	r.Contains(rendered, "creating secret castai-dbo-pooling-credentials")
 	r.Contains(rendered, "creating secret castai-dbo-api-key")
-	r.Contains(rendered, "Installing helm chart castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "Installing helm chart castai-helm/castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "\"castai-helm\" has been added to your repositories")
 	r.Contains(rendered, "Waiting for deployments of release 'castai-dbo' in 'castai-dbo' to be ready")
 	r.Contains(rendered, "Monitoring: deployment.apps/db-agent")
 
@@ -102,14 +134,29 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 	r.NoError(yaml.Unmarshal(valuesBytes, &got))
 	r.Equal(helmValues{
 		DBAgent: dbAgentValues{
-			Enabled:         true,
-			APIURL:          "https://api.cast.ai",
-			APIKeySecretRef: "castai-dbo-api-key",
-			Database:        dbAgentDatabase{CredentialsSecretRef: "castai-dbo-agent-credentials"},
+			Enabled:            true,
+			NameOverride:       "db-agent-castai-dbo",
+			APIURL:             "https://api.cast.ai",
+			OrganizationID:     "org-123",
+			DatabaseInstanceID: "db-123",
+			GRPCEndpoint:       "api-grpc.cast.ai",
+			APIKeySecretRef:    "castai-dbo-api-key",
+			Database: dbAgentDatabase{
+				Host:                 "db.example.com",
+				Port:                 5432,
+				Protocol:             "postgres",
+				CredentialsSecretRef: "castai-dbo-agent-credentials",
+			},
 		},
 		DBProxy: dbProxyValues{
 			Enabled:         true,
+			NameOverride:    "db-proxy-castai-dbo",
+			APIURL:          "api-grpc.cast.ai",
+			OrganizationID:  "org-123",
+			ProxyID:         "proxy-123",
+			Protocol:        "PostgreSQL",
 			APIKeySecretRef: "castai-dbo-api-key",
+			Endpoints:       []dbProxyEndpointValues{{Address: "db.example.com:5432"}},
 			Pooling: poolingValues{
 				Enabled:  true,
 				ProxySQL: proxySQLValues{UserSecretRef: "castai-dbo-pooling-credentials"},
@@ -127,6 +174,7 @@ func TestWizardDryRun_PrintsSecretCommands(t *testing.T) {
 		Namespace:    "castai-dbo",
 		KubeContext:  "kind-test",
 		ChartVersion: "1.4.2",
+		ChartRepo:    "https://charts.example.com/index.yaml",
 		Components:   []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling},
 		AgentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
 		PoolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
@@ -134,6 +182,7 @@ func TestWizardDryRun_PrintsSecretCommands(t *testing.T) {
 		APISecret:    "sec",
 		DryRun:       true,
 	}
+	cfg.ChartRepoAlias = defaultChartRepoAlias
 
 	// A dry run must not touch the cluster: the zero-expectation shell
 	// fails on any run; RealKubectl prints the secret commands.
@@ -164,6 +213,7 @@ func TestWizardInstall_SkipsDisabledComponentsSecrets(t *testing.T) {
 		Namespace:    "castai-dbo",
 		KubeContext:  "kind-test",
 		ChartVersion: "1.4.2",
+		ChartRepo:    "https://charts.example.com/index.yaml",
 		Components:   []string{api.ComponentDBProxy},
 		AgentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
 		PoolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
@@ -171,6 +221,7 @@ func TestWizardInstall_SkipsDisabledComponentsSecrets(t *testing.T) {
 		APISecret:    "sec",
 		DryRun:       true,
 	}
+	cfg.ChartRepoAlias = defaultChartRepoAlias
 
 	k := backendmocks.NewMockKubectl(t)
 	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-api-key",
@@ -241,6 +292,59 @@ func TestNewHelmValues_Cartesian(t *testing.T) {
 			},
 		},
 		{
+			name: "organization ID reaches every component",
+			config: Config{
+				Components:     []string{api.ComponentDBAgent, api.ComponentDBProxy},
+				OrganizationID: "org-123",
+			},
+			want: helmValues{
+				DBAgent: dbAgentValues{Enabled: true, OrganizationID: "org-123"},
+				DBProxy: dbProxyValues{Enabled: true, OrganizationID: "org-123"},
+			},
+		},
+		{
+			name: "database instance ID reaches db-agent, proxy ID reaches db-proxy",
+			config: Config{
+				Components:         []string{api.ComponentDBAgent, api.ComponentDBProxy},
+				DatabaseInstanceID: "db-123",
+				ProxyID:            "proxy-123",
+			},
+			want: helmValues{
+				DBAgent: dbAgentValues{Enabled: true, DatabaseInstanceID: "db-123"},
+				DBProxy: dbProxyValues{Enabled: true, ProxyID: "proxy-123"},
+			},
+		},
+		{
+			name: "endpoints and protocol reach the components",
+			config: Config{
+				Components: []string{api.ComponentDBAgent, api.ComponentDBProxy},
+				Protocol:   protocolMySQL,
+				Endpoints: []Endpoint{
+					{Host: "db.example.com", Port: 3306},
+					{Host: "ro.example.com", Port: 3307, Readonly: true},
+				},
+			},
+			want: helmValues{
+				DBAgent: dbAgentValues{Enabled: true, Database: dbAgentDatabase{Host: "db.example.com", Port: 3306, Protocol: protocolMySQL}},
+				DBProxy: dbProxyValues{
+					Enabled:   true,
+					Protocol:  "MySQL",
+					Endpoints: []dbProxyEndpointValues{{Address: "db.example.com:3306"}, {Address: "ro.example.com:3307", Readonly: true}},
+				},
+			},
+		},
+		{
+			name: "subchart resources are named after the release",
+			config: Config{
+				ReleaseName: "my-instance-37cc7",
+				Components:  []string{api.ComponentDBAgent, api.ComponentDBProxy},
+			},
+			want: helmValues{
+				DBAgent: dbAgentValues{Enabled: true, NameOverride: "db-agent-my-instance-37cc7"},
+				DBProxy: dbProxyValues{Enabled: true, NameOverride: "db-proxy-my-instance-37cc7"},
+			},
+		},
+		{
 			name: "pooling enabled without creds still renders pooling.enabled",
 			config: Config{
 				Components: []string{api.ComponentDBProxy, api.ComponentPooling},
@@ -270,6 +374,45 @@ func TestNewHelmValues_Cartesian(t *testing.T) {
 	}
 }
 
+// TestRepoBaseURL pins how the repository base URL is derived from
+// the index URL: the trailing index.yaml document, query and
+// fragment drop, and anything that is not an absolute URL errors.
+func TestRepoBaseURL(t *testing.T) {
+	tests := map[string]struct {
+		indexURL string
+		want     string
+		wantErr  bool
+	}{
+		"default castai index":             {indexURL: "https://castai.github.io/helm-charts/index.yaml", want: "https://castai.github.io/helm-charts"},
+		"root index":                       {indexURL: "https://charts.example.com/index.yaml", want: "https://charts.example.com"},
+		"nested path":                      {indexURL: "https://charts.example.com/charts/index.yaml", want: "https://charts.example.com/charts"},
+		"trailing slash after index.yaml":  {indexURL: "https://charts.example.com/index.yaml/", want: "https://charts.example.com"},
+		"already a base URL":               {indexURL: "https://charts.example.com/charts/", want: "https://charts.example.com/charts"},
+		"host-only URL":                    {indexURL: "https://charts.example.com", want: "https://charts.example.com"},
+		"port is preserved":                {indexURL: "https://charts.example.com:8080/index.yaml", want: "https://charts.example.com:8080"},
+		"query and fragment are dropped":   {indexURL: "https://charts.example.com/charts/index.yaml?token=abc#frag", want: "https://charts.example.com/charts"},
+		"percent-encoded path round-trips": {indexURL: "https://charts.example.com/my%20charts/index.yaml", want: "https://charts.example.com/my%20charts"},
+		"relative URL is rejected":         {indexURL: "charts.example.com/index.yaml", wantErr: true},
+		"schemeless URL is rejected":       {indexURL: "//charts.example.com/index.yaml", wantErr: true},
+		"whitespace in URL is rejected":    {indexURL: "https://exa mple.com/index.yaml", wantErr: true},
+		"empty URL is rejected":            {indexURL: "", wantErr: true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := require.New(t)
+
+			got, err := repoBaseURL(tt.indexURL)
+			if tt.wantErr {
+				r.Error(err)
+
+				return
+			}
+			r.NoError(err)
+			r.Equal(tt.want, got)
+		})
+	}
+}
+
 // TestBuildHelmArgv_Deterministic locks down the exact argv shape:
 // only the release coordinates, every chart parameter over stdin.
 func TestBuildHelmArgv_Deterministic(t *testing.T) {
@@ -282,11 +425,12 @@ func TestBuildHelmArgv_Deterministic(t *testing.T) {
 		KubeContext:  "kind-test",
 		ChartVersion: "1.4.2",
 	}
+	cfg.ChartRepoAlias = defaultChartRepoAlias
 
 	want := []string{
 		"upgrade", "--install",
 		"castai-dbo",
-		"castai-dbo",
+		"castai-helm/castai-dbo",
 		"--version", "1.4.2",
 		"--namespace", "castai-dbo",
 		"--kube-context", "kind-test",
@@ -311,6 +455,14 @@ func TestHelmValuesMarshal_OmitsEmptySections(t *testing.T) {
 	r.NotContains(rendered, "apiKeySecretRef:")
 	r.NotContains(rendered, "database:")
 	r.NotContains(rendered, "userSecretRef:")
+	r.NotContains(rendered, "organizationID:")
+	r.NotContains(rendered, "databaseInstanceID:")
+	r.NotContains(rendered, "proxyID:")
+	r.NotContains(rendered, "gRPCEndpoint:")
+	r.NotContains(rendered, "protocol:")
+	r.NotContains(rendered, "host:")
+	r.NotContains(rendered, "endpoints:")
+	r.NotContains(rendered, "nameOverride:")
 	r.Contains(rendered, "db-agent:")
 	r.Contains(rendered, "db-proxy:")
 	r.Contains(rendered, "pooling:")

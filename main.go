@@ -28,6 +28,7 @@ var errNotATTY = errors.New("this wizard requires a TTY; run it from a terminal 
 // SetComponents.
 func newRootCmd() *cobra.Command {
 	cfg := backend.NewDefaultConfig()
+	var endpointArgs []string
 
 	cmd := &cobra.Command{
 		Use:   "deployment-wizard",
@@ -43,6 +44,9 @@ The wizard requires a real terminal; it cannot be run from a pipe or CI.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := cfg.SetEndpoints(endpointArgs); err != nil {
+				return fmt.Errorf("--endpoint: %w", err)
+			}
 			components := lo.FilterMap(cfg.Components, func(s string, _ int) (string, bool) {
 				trimmed := strings.TrimSpace(s)
 
@@ -63,6 +67,8 @@ The wizard requires a real terminal; it cannot be run from a pipe or CI.`,
 	_ = cmd.MarkFlagRequired("api-secret")
 	cmd.Flags().StringVar(&cfg.ChartRepo, "chart-repo", cfg.ChartRepo,
 		"URL of the Helm chart repository index.yaml used to list chart versions.")
+	cmd.Flags().StringVar(&cfg.ChartRepoAlias, "repo-alias", cfg.ChartRepoAlias,
+		"Alias the chart repository is registered under with 'helm repo add'; the chart is referenced as alias/chart.")
 	cmd.Flags().StringVar(&cfg.ChartName, "chart-name", cfg.ChartName,
 		"Name of the Helm chart to install.")
 	cmd.Flags().StringVar(&cfg.ChartVersion, "chart-version", cfg.ChartVersion,
@@ -73,6 +79,21 @@ The wizard requires a real terminal; it cannot be run from a pipe or CI.`,
 		"Pre-fills the kubectl-context prompt. The wizard always confirms or overrides.")
 	cmd.Flags().StringVar(&cfg.Namespace, "namespace", cfg.Namespace,
 		"Pre-fills the namespace prompt. The wizard always confirms or overrides.")
+	cmd.Flags().StringVar(&cfg.OrganizationID, "organization-id", "",
+		"CAST AI organization ID to associate the deployment with. Required.")
+	_ = cmd.MarkFlagRequired("organization-id")
+	cmd.Flags().StringVar(&cfg.DatabaseInstanceID, "database-instance-id", "",
+		"Database instance ID the db-agent manages. Required when db-agent is selected.")
+	cmd.Flags().StringVar(&cfg.ProxyID, "proxy-id", "",
+		"ID of this db-proxy instance. Required when db-proxy is selected.")
+	cmd.Flags().StringVar(&cfg.GRPCEndpoint, "grpc-endpoint", cfg.GRPCEndpoint,
+		"CAST AI gRPC endpoint the components report through, scheme-less (e.g. api-grpc.cast.ai). Also sets db-proxy's apiURL.")
+	cmd.Flags().StringVar(&cfg.Protocol, "protocol", "",
+		"Database protocol of the target instance: postgres or mysql. Required.")
+	_ = cmd.MarkFlagRequired("protocol")
+	cmd.Flags().StringArrayVar(&endpointArgs, "endpoint", nil,
+		"Upstream database endpoint as host:port, or host:port,readonly for a read-only upstream; repeatable. "+
+			"The first endpoint is the db-agent's target database.")
 	cmd.Flags().StringSliceVar(&cfg.Components, "components", cfg.Components,
 		"Comma-separated list of chart components to install (e.g. \"db-agent,db-proxy,pooling\"). "+
 			"Allowed values: db-agent, db-proxy, pooling. "+
