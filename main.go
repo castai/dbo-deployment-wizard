@@ -63,6 +63,8 @@ The wizard requires a real terminal; it cannot be run from a pipe or CI.`,
 	_ = cmd.MarkFlagRequired("api-secret")
 	cmd.Flags().StringVar(&cfg.ChartRepo, "chart-repo", cfg.ChartRepo,
 		"URL of the Helm chart repository index.yaml used to list chart versions.")
+	cmd.Flags().StringVar(&cfg.ChartRepoAlias, "repo-alias", cfg.ChartRepoAlias,
+		"Alias the chart repository is registered under with 'helm repo add'; the chart is referenced as alias/chart.")
 	cmd.Flags().StringVar(&cfg.ChartName, "chart-name", cfg.ChartName,
 		"Name of the Helm chart to install.")
 	cmd.Flags().StringVar(&cfg.ChartVersion, "chart-version", cfg.ChartVersion,

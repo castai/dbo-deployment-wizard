@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"al.essio.dev/pkg/shellescape"
 	"gopkg.in/yaml.v3"
@@ -68,6 +69,20 @@ func newHelmValues(c Config) helmValues {
 	return v
 }
 
+// chartRef is the helm chart reference in the repo_name/chart form
+// helm requires for repository charts; the repo is registered under
+// the alias by ensureRepo before the install runs.
+func chartRef(c Config) string {
+	return c.ChartRepoAlias + "/" + c.ChartName
+}
+
+// repoBaseURL derives the helm repository base URL from the index
+// URL the wizard lists versions from, by stripping its index.yaml.
+func repoBaseURL(indexURL string) string {
+	base := strings.TrimSuffix(indexURL, "index.yaml")
+	return strings.TrimSuffix(base, "/")
+}
+
 // BuildHelmArgv produces the `helm upgrade --install` argv: only the
 // release coordinates; every chart parameter travels over stdin
 // (-f -). Deterministic so --dry-run output matches the live run.
@@ -76,7 +91,7 @@ func BuildHelmArgv(c Config) []string {
 		"upgrade",
 		"--install",
 		c.ReleaseName,
-		c.ChartName,
+		chartRef(c),
 		"--version", c.ChartVersion,
 		"--namespace", c.Namespace,
 		"--kube-context", c.KubeContext, //nolint:goconst
@@ -99,7 +114,11 @@ func Install(ctx context.Context, values helmValues, cfg Config, shell ProcessRu
 	// on the terminal.
 	fmt.Fprintln(stdout)
 	fmt.Fprintf(stdout, "Installing helm chart %s:%s as '%s/%s'\n",
-		cfg.ChartName, cfg.ChartVersion, cfg.Namespace, cfg.ReleaseName)
+		chartRef(cfg), cfg.ChartVersion, cfg.Namespace, cfg.ReleaseName)
+
+	if err := ensureRepo(ctx, cfg, shell, stdout); err != nil {
+		return err
+	}
 
 	argv := BuildHelmArgv(cfg)
 
@@ -116,6 +135,33 @@ func Install(ctx context.Context, values helmValues, cfg Config, shell ProcessRu
 	fmt.Fprint(stdout, string(out))
 	if err != nil {
 		return fmt.Errorf("helm upgrade: %w", err)
+	}
+
+	return nil
+}
+
+// ensureRepo registers the chart repository under the config's alias
+// so the repo_name/chart reference resolves; --force-update keeps an
+// existing registration fresh. A dry run prints the command instead.
+func ensureRepo(ctx context.Context, cfg Config, shell ProcessRunner, stdout io.Writer) error {
+	base := repoBaseURL(cfg.ChartRepo)
+	if base == "" {
+		return fmt.Errorf("cannot derive repository URL from %q", cfg.ChartRepo)
+	}
+
+	argv := []string{"repo", "add", cfg.ChartRepoAlias, base, "--force-update"}
+
+	if cfg.DryRun {
+		fmt.Fprintln(stdout, "# Dry run: not executing. Repository command that would run:")
+		fmt.Fprintln(stdout, "helm "+shellescape.QuoteCommand(argv))
+
+		return nil
+	}
+
+	out, err := shell.Run(ctx, "helm", nil, argv)
+	fmt.Fprint(stdout, string(out))
+	if err != nil {
+		return fmt.Errorf("helm repo add: %w", err)
 	}
 
 	return nil

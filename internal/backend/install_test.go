@@ -22,11 +22,13 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 		Namespace:    "castai-dbo",
 		KubeContext:  "kind-test",
 		ChartVersion: "1.4.2",
+		ChartRepo:    "https://charts.example.com/index.yaml",
 		Components:   []string{api.ComponentDBProxy, api.ComponentPooling},
 		APIURL:       "https://api.cast.ai",
 		APISecret:    "sec",
 		DryRun:       true,
 	}
+	cfg.ChartRepoAlias = defaultChartRepoAlias
 
 	// The strict mock fails on any shell run — a dry run must not execute.
 	sh := backendmocks.NewMockProcessRunner(t)
@@ -36,11 +38,13 @@ func TestExecutorDryRun_DoesNotInvokeHelm(t *testing.T) {
 	r.NoError(Install(t.Context(), values, cfg, sh, &out))
 
 	rendered := out.String()
-	r.Contains(rendered, "Installing helm chart castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "Installing helm chart castai-helm/castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "# Dry run: not executing. Repository command that would run:")
+	r.Contains(rendered, "helm repo add castai-helm https://charts.example.com --force-update")
 	r.Contains(rendered, "# Dry run: not executing. Values that would be applied:")
 	r.Contains(rendered, "enabled: true")
 	r.Contains(rendered, "# Exact command that would run:")
-	r.Contains(rendered, "helm upgrade --install castai-dbo castai-dbo --version 1.4.2 --namespace castai-dbo --kube-context kind-test --create-namespace -f -") //nolint:dupword
+	r.Contains(rendered, "helm upgrade --install castai-dbo castai-helm/castai-dbo --version 1.4.2 --namespace castai-dbo --kube-context kind-test --create-namespace -f -") //nolint:dupword
 }
 
 func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
@@ -52,12 +56,14 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 		Namespace:    "castai-dbo",
 		KubeContext:  "kind-test",
 		ChartVersion: "1.4.2",
+		ChartRepo:    "https://charts.example.com/index.yaml",
 		Components:   []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling},
 		AgentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
 		PoolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
 		APIURL:       "https://api.cast.ai",
 		APISecret:    "sec",
 	}
+	cfg.ChartRepoAlias = defaultChartRepoAlias
 
 	k := backendmocks.NewMockKubectl(t)
 	k.EXPECT().ListSecrets(mock.Anything, "kind-test", "castai-dbo").Return(nil, nil)
@@ -72,6 +78,9 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 
 	var valuesBytes []byte
 	sh := backendmocks.NewMockProcessRunner(t)
+	sh.EXPECT().Run(mock.Anything, "helm", mock.Anything,
+		mock.MatchedBy(func(args []string) bool { return args[0] == "repo" })).
+		Return([]byte("\"castai-helm\" has been added to your repositories\n"), nil)
 	sh.EXPECT().Run(mock.Anything, "helm", mock.Anything,
 		mock.MatchedBy(func(args []string) bool { return args[0] == "upgrade" })).
 		Run(func(_ context.Context, _ string, stdin []byte, _ []string) {
@@ -92,7 +101,8 @@ func TestExecutorLiveRun_InvokesHelm(t *testing.T) {
 	r.Contains(rendered, "creating secret castai-dbo-agent-credentials")
 	r.Contains(rendered, "creating secret castai-dbo-pooling-credentials")
 	r.Contains(rendered, "creating secret castai-dbo-api-key")
-	r.Contains(rendered, "Installing helm chart castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "Installing helm chart castai-helm/castai-dbo:1.4.2 as 'castai-dbo/castai-dbo'")
+	r.Contains(rendered, "\"castai-helm\" has been added to your repositories")
 	r.Contains(rendered, "Waiting for deployments of release 'castai-dbo' in 'castai-dbo' to be ready")
 	r.Contains(rendered, "Monitoring: deployment.apps/db-agent")
 
@@ -127,6 +137,7 @@ func TestWizardDryRun_PrintsSecretCommands(t *testing.T) {
 		Namespace:    "castai-dbo",
 		KubeContext:  "kind-test",
 		ChartVersion: "1.4.2",
+		ChartRepo:    "https://charts.example.com/index.yaml",
 		Components:   []string{api.ComponentDBAgent, api.ComponentDBProxy, api.ComponentPooling},
 		AgentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
 		PoolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
@@ -134,6 +145,7 @@ func TestWizardDryRun_PrintsSecretCommands(t *testing.T) {
 		APISecret:    "sec",
 		DryRun:       true,
 	}
+	cfg.ChartRepoAlias = defaultChartRepoAlias
 
 	// A dry run must not touch the cluster: the zero-expectation shell
 	// fails on any run; RealKubectl prints the secret commands.
@@ -164,6 +176,7 @@ func TestWizardInstall_SkipsDisabledComponentsSecrets(t *testing.T) {
 		Namespace:    "castai-dbo",
 		KubeContext:  "kind-test",
 		ChartVersion: "1.4.2",
+		ChartRepo:    "https://charts.example.com/index.yaml",
 		Components:   []string{api.ComponentDBProxy},
 		AgentCreds:   api.Credentials{Username: "agent", Password: "agentpass"},
 		PoolingCreds: api.Credentials{Username: "pooler", Password: "poolpass"},
@@ -171,6 +184,7 @@ func TestWizardInstall_SkipsDisabledComponentsSecrets(t *testing.T) {
 		APISecret:    "sec",
 		DryRun:       true,
 	}
+	cfg.ChartRepoAlias = defaultChartRepoAlias
 
 	k := backendmocks.NewMockKubectl(t)
 	k.EXPECT().EnsureSecret(mock.Anything, "kind-test", "castai-dbo", "castai-dbo-api-key",
@@ -282,11 +296,12 @@ func TestBuildHelmArgv_Deterministic(t *testing.T) {
 		KubeContext:  "kind-test",
 		ChartVersion: "1.4.2",
 	}
+	cfg.ChartRepoAlias = defaultChartRepoAlias
 
 	want := []string{
 		"upgrade", "--install",
 		"castai-dbo",
-		"castai-dbo",
+		"castai-helm/castai-dbo",
 		"--version", "1.4.2",
 		"--namespace", "castai-dbo",
 		"--kube-context", "kind-test",

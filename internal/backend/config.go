@@ -22,7 +22,8 @@ type Config struct {
 	ChartVersion string
 
 	// Chart sourcing config, not a helm value.
-	ChartRepo string
+	ChartRepo       string
+	ChartRepoAlias string
 
 	// AgentCreds are the db-agent's database credentials; PoolingCreds
 	// are db-proxy's (pooling). Each either references an existing
@@ -52,17 +53,23 @@ const (
 	defaultChartName   = "castai-dbo"
 	defaultReleaseName = "castai-dbo"
 	defaultNamespace   = "castai-db-optimizer"
+
+	// defaultChartRepoAlias is the helm repository alias the install
+	// registers the chart repository under; it must match the
+	// repo_name/chart form helm expects for the chart reference.
+	defaultChartRepoAlias = "castai-helm"
 )
 
 // NewDefaultConfig returns the initial configuration with every
 // static field prefilled.
 func NewDefaultConfig() Config {
 	return Config{
-		APIURL:      defaultAPIBaseURL,
-		ChartRepo:   DefaultIndexURL,
-		ChartName:   defaultChartName,
-		ReleaseName: defaultReleaseName,
-		Namespace:   defaultNamespace,
+		APIURL:          defaultAPIBaseURL,
+		ChartRepo:       DefaultIndexURL,
+		ChartRepoAlias:  defaultChartRepoAlias,
+		ChartName:        defaultChartName,
+		ReleaseName:      defaultReleaseName,
+		Namespace:        defaultNamespace,
 
 		Components: []string{api.ComponentDBAgent, api.ComponentDBProxy},
 	}
@@ -156,6 +163,9 @@ func (c *Config) validate() error {
 	}
 	if c.ChartName == "" {
 		errs = append(errs, errors.New("chart name is required"))
+	}
+	if c.ChartRepoAlias == "" {
+		errs = append(errs, errors.New("chart repository alias is required"))
 	}
 	if c.KubeContext == "" {
 		errs = append(errs, errors.New("kubectl context is required"))
